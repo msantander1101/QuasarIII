@@ -1,0 +1,52 @@
+booktype
+aiohttp
+urllib3
+django-scheduler
+reportlab
+pypdf2
+folium
+streamlit-folium
+pysocks
+email-validator
+sherlock
+dnspython
+python-whois
+cryptography
+pyjwt
+python-dotenv
+holehe
+instaloader
+pillow
+sherlock-project
+networkx
+exifread
+pywhat
+reportlab
+PyPDF2
+pdfkit
+wkhtmltopdf==0.2  # Requiere instalar wkhtmltopdf en el sistema
+python-docx
+markdown2
+weasyprint
+matplotlib
+seaborn
+plotly
+# Fechas formateadas
+babel
+# Proxy & Anonymity
+requests[socks]
+PySocks
+urllib3
+
+# Grafo de Relaciones
+pyvis
+numpy
+
+# Network Analysis
+scipy
+scikit-learn
+
+# UI Mejorada
+streamlit-aggrid
+streamlit-folium
+extra-streamlit-components

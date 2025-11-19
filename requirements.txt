@@ -1,52 +1,14 @@
+langchain-openai
 booktype
-aiohttp
-urllib3
-django-scheduler
-reportlab
-pypdf2
-folium
-streamlit-folium
-pysocks
-email-validator
-sherlock
-dnspython
-python-whois
-cryptography
-pyjwt
-python-dotenv
-holehe
-instaloader
-pillow
-sherlock-project
-networkx
-exifread
-pywhat
-reportlab
-PyPDF2
-pdfkit
-wkhtmltopdf==0.2  # Requiere instalar wkhtmltopdf en el sistema
-python-docx
-markdown2
-weasyprint
-matplotlib
-seaborn
-plotly
-# Fechas formateadas
-babel
-# Proxy & Anonymity
-requests[socks]
-PySocks
-urllib3
-
-# Grafo de Relaciones
-pyvis
-numpy
-
-# Network Analysis
-scipy
-scikit-learn
-
-# UI Mejorada
-streamlit-aggrid
-streamlit-folium
-extra-streamlit-components
+streamlit~=1.51.0
+networkx~=3.5
+matplotlib~=3.10.7
+bcrypt~=5.0.0
+openai~=2.8.0
+langchain-core~=1.0.5
+langchain~=1.0.7
+redis~=7.0.1
+requests~=2.32.5
+python-docx~=1.2.0
+aiohttp~=3.13.2
+reportlab~=4.4.4

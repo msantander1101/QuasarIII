@@ -15,10 +15,23 @@ def show_login_with_tabs():
     """
 
     # Contenido principal sin sidebar
+    # For the login and registration screens we override the global
+    # background style.  Streamlit renders the app inside an element
+    # with the class `stApp`; by injecting CSS here we make the
+    # background darker and more in line with the rest of the app.
+    st.markdown("""
+        <style>
+        .stApp {
+            background: linear-gradient(135deg, #3a7bd5 0%, #004e92 100%) !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     st.markdown("""
         <style>
         body {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            /* Fondo en degradado azul oscuro para que la página de inicio no se vea tan blanca */
+            background: linear-gradient(135deg, #3a7bd5 0%, #004e92 100%);
             margin: 0;
             padding: 0;
             min-height: 100vh;
@@ -53,9 +66,10 @@ def show_login_with_tabs():
             right: -30px; 
             width: 100px; 
             height: 100px; 
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
+            /* Elemento decorativo en tonos azules */
+            background: linear-gradient(135deg, #3a7bd5 0%, #004e92 100%); 
             border-radius: 50%; 
-            opacity: 0.2;
+            opacity: 0.15;
         }
         .decor-bg-2 {
             position: absolute; 
@@ -63,9 +77,9 @@ def show_login_with_tabs():
             left: -20px; 
             width: 80px; 
             height: 80px; 
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
+            background: linear-gradient(135deg, #3a7bd5 0%, #004e92 100%); 
             border-radius: 50%; 
-            opacity: 0.2;
+            opacity: 0.15;
         }
         </style>
         <div class="login-container">

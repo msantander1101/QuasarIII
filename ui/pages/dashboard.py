@@ -14,13 +14,16 @@ def show_dashboard():
     Dashboard completamente sin barra lateral
     """
     # Header moderno con logo y título
+    # Cabecera con nuevo esquema de colores.  Hemos sustituido el degradado
+    # anterior por un degradado más oscuro (azules profundos) que mejora el
+    # contraste con el texto blanco y ofrece un aspecto SaaS profesional.
     st.markdown("""
-        <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
-                    padding: 20px; border-radius: 10px; margin-bottom: 20px;">
-            <h1 style="color: white; text-align: center; margin: 0;">
+        <div style="background: linear-gradient(135deg, #3a7bd5 0%, #004e92 100%); 
+                    padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+            <h1 style="color: #ffffff; text-align: center; margin: 0;">
                 🚀 Quasar III OSINT Suite
             </h1>
-            <p style="color: rgba(255,255,255,0.9); text-align: center; margin: 10px 0;">
+            <p style="color: rgba(255,255,255,0.95); text-align: center; margin: 10px 0;">
                 Panel de Control Profesional de Análisis OSINT
             </p>
         </div>
@@ -118,7 +121,7 @@ def show_dashboard():
             for i, person in enumerate(recent_persons[:5]):
                 person_card = f"""
                 <div style="border: 1px solid #e9ecef; border-radius: 8px; padding: 15px; margin-bottom: 10px; 
-                           background: red; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                           background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
                             <h4 style="margin: 0; color: #495057;">{person['name']}</h4>

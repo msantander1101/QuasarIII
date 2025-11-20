@@ -13,13 +13,16 @@ def show_settings_page():
     Página de configuración completa con gestor de API Keys
     """
 
+    # Cabecera con nuevo degradado oscuro para mejorar la legibilidad del texto
+    # blanco.  Este esquema de colores se ajusta a la estética SaaS utilizada en
+    # el dashboard y proporciona coherencia visual a la aplicación.
     st.markdown("""
-        <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
-                    padding: 20px; border-radius: 10px; margin-bottom: 20px;">
-            <h1 style="color: white; text-align: center; margin: 0;">
+        <div style="background: linear-gradient(135deg, #3a7bd5 0%, #004e92 100%); 
+                    padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+            <h1 style="color: #ffffff; text-align: center; margin: 0;">
                 ⚙️ Configuración de API Keys
             </h1>
-            <p style="color: rgba(255,255,255,0.9); text-align: center; margin: 10px 0;">
+            <p style="color: rgba(255,255,255,0.95); text-align: center; margin: 10px 0;">
                 Administra tus claves API para integraciones avanzadas
             </p>
         </div>
@@ -41,23 +44,41 @@ def show_settings_page():
     # --- Lista de API Keys disponibles ---
     st.markdown("### 🔑 Claves API Disponibles")
 
+    # Fuentes que REQUIEREN API Key
     api_keys_config = {
-        "serpapi": "🔍 SerpAPI (Google Search)",
-        "google_api_key": "🌐 Google Custom Search API",
-        "google_cse_cx": "🧩 Google CSE CX ID",
         "hibp": "💀 Have I Been Pwned",
+        "openai_api_key": "🧠 OpenAI / GPT API Key",
+        "google_api_key": "🌐 Google Custom Search API",
+        "serpapi": "🔍 SerpAPI (Google Search)",
         "hunter": "📧 Hunter.io",
         "whoisxml": "🌍 WhoisXML API",
         "shodan": "🕷️ Shodan",
         "virustotal": "🧬 VirusTotal",
-        "openai_api_key": "🧠 OpenAI / GPT API Key",
+
+        # SOCMINT
         "instagram_api_key": "📸 Instagram API",
         "tiktok_api_key": "🎵 TikTok API",
         "youtube_api_key": "📺 YouTube API",
         "twitter_api_key": "🐦 Twitter API",
         "linkedin_api_key": "💼 LinkedIn API",
         "facebook_api_key": "📘 Facebook API",
-        "reddit_api_key": "📊 Reddit API"
+        "reddit_api_key": "📊 Reddit API",
+
+        # Fuentes generales reales
+        "predictasearch_api_key": "🔮 PredictaSearch",
+        "theirstack_api_key": "📊 TheirStack",
+        "analystresearchtools_api_key": "📊 AnalystResearchTools",
+        "carnetai_api_key": "🤖 Carnet.ai",
+        "vehicleai_api_key": "🚗 Vehicle-AI",
+        "osintnova_api_key": "💼 OSINT Nova"
+    }
+
+    # Fuentes que NO REQUIEREN API Key (búsqueda web pública)
+    no_api_keys_config = {
+        "web_search": "🌐 Búsqueda Web General",
+        "google_search": "🔍 Google Search",
+        "bing_search": "🔍 Bing Search",
+        "duckduckgo_search": "🔍 DuckDuckGo Search"
     }
 
     st.markdown("#### ✅ Configuración Actual")
@@ -74,68 +95,68 @@ def show_settings_page():
     # --- Agregar o modificar clave ---
     st.markdown("### ➕ Configurar Nueva API Key")
 
-    # Seleccionar tipo de clave
+    # Separar las opciones por tipo
+    all_keys = list(api_keys_config.keys()) + list(no_api_keys_config.keys())
+
     selected_api = st.selectbox(
         "Selecciona el servicio API",
-        list(api_keys_config.keys()),
-        format_func=lambda x: api_keys_config[x],
+        all_keys,
+        format_func=lambda x: api_keys_config.get(x, no_api_keys_config.get(x, x)),
         key="select_api_key"
     )
 
     # Obtener nombre legible del servicio
-    api_name = api_keys_config[selected_api]
+    api_name = api_keys_config.get(selected_api, no_api_keys_config.get(selected_api, selected_api))
 
-    # Valor de la clave
-    api_value = st.text_input(
-        f"Valor de la clave para {api_name}",
-        type='password',
-        key=f"api_value_{selected_api}",
-        placeholder="Introduce tu clave API..."
-    )
+    # Determinar si requiere API Key
+    requires_api = selected_api in api_keys_config
 
-    # Ayuda contextual por cada API
-    help_texts = {
-        "serpapi": "Clave para búsqueda de Google Search con SerpAPI",
-        "google_api_key": "API key para Google Custom Search",
-        "google_cse_cx": "Identificador de motor de búsqueda personalizado",
-        "hibp": "Clave API para Have I Been Pwned (recomendado)",
-        "hunter": "Clave API para Hunter.io (email verification)",
-        "whoisxml": "Clave API para WhoisXML (WHOIS information)",
-        "shodan": "Clave API para Shodan (network scanner)",
-        "virustotal": "Clave API para VirusTotal (malware detection)",
-        "openai_api_key": "Clave API para OpenAI/GPT (IA integrada)",
-        "instagram_api_key": "Clave API para Instagram (integración SOCMINT)",
-        "tiktok_api_key": "Clave API para TikTok (integración SOCMINT)",
-        "youtube_api_key": "Clave API para YouTube (integración SOCMINT)",
-        "twitter_api_key": "Clave API para Twitter (integración SOCMINT)",
-        "linkedin_api_key": "Clave API para LinkedIn (integración SOCMINT)",
-        "facebook_api_key": "Clave API para Facebook (integración SOCMINT)",
-        "reddit_api_key": "Clave API para Reddit (integración SOCMINT)"
-    }
+    if requires_api:
+        # Valor de la clave
+        api_value = st.text_input(
+            f"Valor de la clave para {api_name}",
+            type='password',
+            key=f"api_value_{selected_api}",
+            placeholder="Introduce tu clave API..."
+        )
 
-    if st.button("💾 Guardar Clave API", key="save_api_button"):
-        if selected_api and api_value:
-            success = config_manager.save_config(user_id, selected_api, api_value)
-            if success:
-                st.success(f"✅ Clave API '{selected_api}' guardada correctamente.")
-                st.rerun()  # Recarga para reflejar cambio
+        # Mostrar información de uso
+        if selected_api in api_keys_config:
+            st.info(f"ℹ️ {api_name} - Requiere clave API para acceso completo")
+            if selected_api == "hibp":
+                st.info("💡 Suggestion: Regístrate en haveibeenpwned.com para obtener tu clave de API gratuita")
+            elif selected_api == "google_api_key":
+                st.info("💡 Suggestion: Crea un proyecto en Google Cloud Console y habilita Google Custom Search API")
+
+        # Botón de guardado
+        if st.button("💾 Guardar Clave API", key="save_api_button"):
+            if selected_api and api_value:
+                success = config_manager.save_config(user_id, selected_api, api_value)
+                if success:
+                    st.success(f"✅ Clave API '{selected_api}' guardada correctamente.")
+                    st.rerun()  # Recarga para reflejar cambio
+                else:
+                    st.error("❌ Error al guardar la clave.")
+                    logger.error(f"Fallo al guardar configuracion para usuario {user_id} clave {selected_api}")
             else:
-                st.error("❌ Error al guardar la clave.")
-                logger.error(f"Fallo al guardar configuracion para usuario {user_id} clave {selected_api}")
-        else:
-            st.warning("⚠️ Por favor ingresa el tipo de clave y su valor.")
+                st.warning("⚠️ Por favor ingresa el tipo de clave y su valor.")
+    else:
+        # Para fuentes sin API Key, no mostramos input
+        st.info(f"ℹ️ {api_name} - No requiere clave API, está disponible para búsqueda pública")
+        # Este se procesa automáticamente
 
     # --- Eliminar claves existentes ---
     st.markdown("### ❌ Eliminar Clave API Existente")
 
     # Mostrar claves existentes para eliminar
     existing_keys = [item['config_key'] for item in current_configs]
+
     if existing_keys:
         remove_key = st.selectbox(
             "Selecciona una clave para eliminar",
             existing_keys,
             key="delete_key_selector",
-            format_func=lambda x: f"{x} - {api_keys_config.get(x, 'Clave desconocida')}"
+            format_func=lambda x: f"{x} - {api_keys_config.get(x, no_api_keys_config.get(x, 'Clave desconocida'))}"
         )
         if st.button("🗑️ Eliminar Clave Seleccionada", key="delete_button"):
             deleted = config_manager.delete_config(user_id, remove_key)
@@ -154,11 +175,7 @@ def show_settings_page():
     required_keys = [
         "hibp",  # Obligatoria para verificación de emails
         "openai_api_key",  # Obligatoria para AI integrada
-        "instagram_api_key",
-        "tiktok_api_key",
-        "youtube_api_key",
-        "twitter_api_key",
-        "linkedin_api_key"
+        "google_api_key"  # Obligatoria para búsqueda web avanzada
     ]
 
     required_status = {key: config_manager.get_config(user_id, key) for key in required_keys}
@@ -184,7 +201,8 @@ def show_settings_page():
     - Verificar información de dominios con WhoisXML
     - Hacer búsquedas de personas con Hunter.io
     - Usar inteligencia artificial con OpenAI/GPT
-    - Realizar búsquedas en redes sociales con integación SOCMINT
+    - Acceder a búsquedas especializadas en SOCMINT
+    - Utilizar fuentes avanzadas de búsqueda
     """)
 
     # Botón para volver al dashboard

@@ -16,14 +16,16 @@ def show_social_search_ui():
     Interfaz para búsquedas de SOCMINT completamente real con APIs
     """
 
-    # Header moderno
+    # Encabezado moderno actualizado con degradado azul oscuro.  Utilizamos el
+    # mismo esquema de colores que el resto de la aplicación para mantener la
+    # coherencia visual y mejorar la legibilidad del texto.
     st.markdown("""
-        <div style="background: linear-gradient(135deg, #2c2c54 0%, #4a4a6a 100%); 
-                    padding: 25px; border-radius: 15px; margin-bottom: 25px; box-shadow: 0 8px 25px rgba(0,0,0,0.15);">
-            <h1 style="color: white; text-align: center; margin: 0; font-size: 28px;">
+        <div style="background: linear-gradient(135deg, #3a7bd5 0%, #004e92 100%);
+                    padding: 25px; border-radius: 15px; margin-bottom: 25px; box-shadow: 0 8px 25px rgba(0,0,0,0.1);">
+            <h1 style="color: #ffffff; text-align: center; margin: 0; font-size: 28px;">
                 🕵️‍♀️ SOCMINT Búsqueda Real
             </h1>
-            <p style="color: rgba(255,255,255,0.9); text-align: center; margin: 15px 0; font-size: 16px;">
+            <p style="color: rgba(255,255,255,0.95); text-align: center; margin: 15px 0; font-size: 16px;">
                 Exploración completa de perfiles en redes sociales con datos reales
             </p>
         </div>

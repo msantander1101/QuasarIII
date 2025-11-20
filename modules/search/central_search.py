@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 class SearchCoordinator:
     """
-    Coordinador de búsqueda central que integra todos los módulos reales
+    Coordinador de búsqueda central que integra todos los módulos reales y confiables
     """
 
     def __init__(self):
@@ -27,7 +27,9 @@ class SearchCoordinator:
             'general': general_search,
             'people': people_search,
             'email': emailint,
-            'social': socmint
+            'social': socmint,
+            'darkweb': darkweb,
+            'archive': archive_search
         }
 
     def search(self, query: str, sources: List[str] = None, **kwargs) -> Dict[str, Any]:
@@ -42,17 +44,15 @@ class SearchCoordinator:
         for source_name in selected_sources:
             if source_name in self.providers:
                 try:
-                    # Proveer los argumentos adecuados para cada fuente
                     provider = self.providers[source_name]
 
+                    # Manejo por fuente
                     if source_name == 'general':
-                        # Búsqueda general usando motores reales
                         search_kwargs = kwargs.get('general_options', {})
-                        result = provider.general_web_search(query, search_kwargs.get('max_results', 10))
+                        result = provider.general_web_search(query, max_results=search_kwargs.get('max_results', 10))
                         results[source_name] = result
 
                     elif source_name == 'people':
-                        # Búsqueda avanzada de personas
                         search_kwargs = kwargs.get('people_options', {})
                         search_type = search_kwargs.get('type', 'people')
                         criteria = {'name': query}
@@ -62,17 +62,18 @@ class SearchCoordinator:
                         results[source_name] = result
 
                     elif source_name == 'email':
-                        # Búsqueda de información por email real
+                        # El módulo emailint ya tiene el acceso a hibp_key
                         hibp_key = kwargs.get('hibp_api_key')
                         if query and '@' in query:
                             search_kwargs = kwargs.get('email_options', {})
-                            result = provider.search_email_info(query, hibp_key)
+                            result = provider.search_email_info(query, user_id=None, services=None)  # user_id no requerido aquí
                             results[source_name] = result
                         else:
-                            results[source_name] = {"warning": "Búsqueda por email requiere formato válido"}
+                            results[source_name] = {
+                                "warning": "Búsqueda por email requiere formato válido (ej: juan@empresa.com)"
+                            }
 
                     elif source_name == 'social':
-                        # Búsqueda social con credenciales reales
                         search_kwargs = kwargs.get('social_options', {})
                         usernames = search_kwargs.get('usernames', [query])
                         platforms = search_kwargs.get('platforms', ['twitter', 'linkedin'])
@@ -81,17 +82,30 @@ class SearchCoordinator:
                             social_results = provider.search_multiple_social_profiles(usernames, platforms, api_configs)
                             results[source_name] = social_results
                         else:
-                            results[source_name] = {"warning": "Necesita usernames y plataformas para búsqueda social"}
+                            results[source_name] = {
+                                "warning": "Necesita usernames y plataformas para búsqueda social"
+                            }
+
+                    elif source_name == 'darkweb':
+                        # Búsqueda real en catálogo oscuro (con API real si está disponible)
+                        darkweb_options = kwargs.get('darkweb_options', {})
+                        result = provider.search_dark_web_catalog(query, max_results=darkweb_options.get('max_results', 5))
+                        results[source_name] = result
+
+                    elif source_name == 'archive':
+                        # Búsqueda en arquitectura web (Wayback, Archive)
+                        archive_options = kwargs.get('archive_options', {})
+                        result = provider.search_web_archives(query, archive_options.get('sources', ['wayback', 'archive']))
+                        results[source_name] = result
 
                     else:
-                        # Fallback general
-                        results[source_name] = {"warning": f"No se pudo completar búsqueda en {source_name}"}
+                        results[source_name] = {"warning": f"Fuente no soportada: {source_name}"}
 
                 except Exception as e:
-                    logger.error(f"Error en buscar en fuente {source_name}: {e}")
+                    logger.error(f"Error al ejecutar búsqueda en fuente {source_name}: {e}")
                     results[source_name] = {"error": str(e)}
             else:
-                results[source_name] = {"error": f"Fuente de búsqueda '{source_name}' no soportada"}
+                results[source_name] = {"error": f"Fuente inexistente: {source_name}"}
 
         return results
 
@@ -100,8 +114,61 @@ class SearchCoordinator:
 coordinator = SearchCoordinator()
 
 
-def execute_search(query: str, sources: List[str] = None, **kwargs) -> Dict[str, Any]:
+def execute_search(query: str, sources: List[str] = None, user_id: int = None, **kwargs) -> Dict[str, Any]:
     """
-    Función directa para ejecutar búsqueda centralizada
+    Función directa para ejecutar búsqueda centralizada con datos reales
     """
-    return coordinator.search(query, sources, **kwargs)
+    # Solo si se requieren fuentes avanzadas (con API real), usamos auth
+    real_sources = [
+        'predictasearch', 'theirstack', 'analystresearchtools',
+        'carnetai', 'vehicleai', 'osintnova'
+    ]
+    if sources and any(s in real_sources for s in sources):
+        return general_search.search_general_real(query, user_id, sources)
+
+    # Búsqueda estándar para fuentes reales (HIBP, SkyMem, etc.)
+    logger.info(f"Realizando búsqueda estándar: {query}, fuentes: {sources}")
+    results = {}
+
+    if sources is None:
+        sources = list(coordinator.providers.keys())
+
+    for source_name in sources:
+        if source_name in coordinator.providers:
+            try:
+                logger.debug(f"Ejecutando módulo '{source_name}' para consulta: '{query}'")
+
+                # Aseguramos que la función exista
+                search_func = None
+                if hasattr(coordinator.providers[source_name], 'search_' + source_name):
+                    search_func = getattr(coordinator.providers[source_name], 'search_' + source_name)
+                elif hasattr(coordinator.providers[source_name], source_name + '_search'):
+                    search_func = getattr(coordinator.providers[source_name], source_name + '_search')
+                elif hasattr(coordinator.providers[source_name], 'search'):
+                    search_func = getattr(coordinator.providers[source_name], 'search')
+
+                if not search_func or not callable(search_func):
+                    logger.warning(f"No se encontró función de búsqueda en {source_name}")
+                    results[source_name] = {"error": "Función no encontrada"}
+                    continue
+
+                # Pasamos el user_id solo si es necesario (por ejemplo en emailint)
+                search_kwargs = kwargs.get(f"{source_name}_options", {})
+                if source_name == 'email':
+                    hibp_key = kwargs.get('hibp_api_key')
+                    # Se pasará directamente al módulo emailint
+                    search_kwargs['hibp_api_key'] = hibp_key
+
+                if source_name == 'email':
+                    result = search_func(query, hibp_key=hibp_key, **search_kwargs)
+                else:
+                    result = search_func(query, **search_kwargs)
+
+                results[source_name] = result
+            except Exception as e:
+                logger.error(f"Error en {source_name}: {str(e)}")
+                results[source_name] = {"error": str(e)}
+        else:
+            results[source_name] = {"error": f"Fuente no soportada: {source_name}"}
+
+    return results

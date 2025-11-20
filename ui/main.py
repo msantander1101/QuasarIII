@@ -42,6 +42,16 @@ logger = setup_logger()
 def main():
     logger.info("Iniciando aplicación Streamlit - Quasar III OSINT Suite")
 
+    # Configurar la página con un estado inicial de sidebar colapsado.  Esto
+    # complementa la opción `showSidebarNavigation` en `.streamlit/config.toml`
+    # para garantizar que la navegación por defecto de Streamlit no se muestre.
+    st.set_page_config(
+        page_title="Quasar III OSINT Suite",
+        page_icon="🕵️‍♂️",
+        layout="wide",
+        initial_sidebar_state="collapsed"
+    )
+
     # Asegura que la BD está creada
     create_db()
 
@@ -74,13 +84,16 @@ def main():
             else:
                 initialize_ai_analyzer(None)
 
-    # Mostrar contenido principal (sin sidebar)
+    # Mostrar contenido principal (sin sidebar).  Establecemos un fondo más
+    # oscuro con un degradado en tonos azules profundos para que la información
+    # destaque mejor y la aplicación tenga un aspecto más profesional.  Además
+    # ocultamos el menú principal y el pie de página de Streamlit.
     st.markdown("""
         <style>
         .stApp {
-            background: linear-gradient(135deg, #f5f7fa 0%, #e4edf5 100%) !important;
+            background: linear-gradient(135deg, #0a192f 0%, #274472 100%) !important;
         }
-        #MainMenu {visibility: hidden;}
+        MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         </style>
     """, unsafe_allow_html=True)
@@ -90,7 +103,7 @@ def main():
         logger.info(f"Sesión activa. Usuario identificado: { st.session_state.get('current_user', {}).get('username', 'Desconocido') }")
         page = st.session_state.get('page', 'dashboard')
 
-        # Navegación basada en estado (ahora todo está en la página)
+        # Navegación basada en estado
         if page == 'person_search':
             show_person_search_ui() # Mostrar el panel de búsqueda avanzada
         elif page == 'graph_visualization':

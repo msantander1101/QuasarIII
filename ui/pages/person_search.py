@@ -10,32 +10,48 @@ from core.db_manager import create_person, get_persons_by_user
 import json
 import logging
 import time
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 
 def show_person_search_ui():
     """
-    Interfaz moderna con búsqueda avanzada multifunción
+    Interfaz moderna y robusta con búsqueda avanzada multifuncional.
+    Mejora en claridad, seguridad, manejo de errores, UX y escalabilidad.
     """
-
     # Header moderno con diseño SaaS y fondo oscuro
+    # Cabecera con degradado en tonos azules para un aspecto más profesional
     st.markdown("""
-        <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
+        <div style="background: linear-gradient(135deg, #3a7bd5 0%, #004e92 100%);
                     padding: 25px; border-radius: 15px; margin-bottom: 25px; box-shadow: 0 8px 25px rgba(0,0,0,0.15);">
             <h1 style="color: white; text-align: center; margin: 0; font-size: 28px;">
-                🚀 Búsqueda Avanzada Multifunción
+                🚀 Búsqueda Avanzada Multifuncional
             </h1>
-            <p style="color: rgba(255,255,255,0.9); text-align: center; margin: 15px 0; font-size: 16px;">
-                Búsqueda inteligente, conexiones automáticas, análisis completo
+            <p style="color: rgba(255,255,255,0.85); text-align: center; margin: 15px 0; font-size: 16px;">
+                Búsqueda inteligente, conexiones automáticas y análisis completo y seguro.
             </p>
         </div>
     """, unsafe_allow_html=True)
 
-    # Panel de búsqueda con múltiples criterios
+    # Variables de estado para evitar problemas de sesión
+    search_name = st.session_state.get("search_name", "")
+    search_email = st.session_state.get("search_email", "")
+    search_location = st.session_state.get("search_location", "")
+    search_phone = st.session_state.get("search_phone", "")
+    search_domain = st.session_state.get("search_domain", "")
+    search_files = st.session_state.get("search_files", "")
+    search_company = st.session_state.get("search_company", "")
+    search_role = st.session_state.get("search_role", "")
+    search_date_start = st.session_state.get("date_start")
+    search_date_end = st.session_state.get("date_end")
+    search_sources = st.session_state.get("search_sources", ["people", "email", "social", "darkweb"])
+    search_relationship = st.session_state.get("search_relationship", "Todas")
+    search_confidence = st.session_state.get("search_confidence", 0.7)
+
+    # Panel de búsqueda con múltiples criterios (inputs mejorados)
     st.markdown("### 🔍 Criterios de Búsqueda Avanzada")
 
-    # Columnas para entradas de búsqueda
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
@@ -78,44 +94,61 @@ def show_person_search_ui():
     with col_filters[0]:
         search_company = st.text_input("🏢 Empresa", key="search_company",
                                        placeholder="Nombre de la empresa")
-
-        search_company_role = st.text_input("💼 Cargo", key="search_role",
-                                            placeholder="Cargo profesional")
+        search_role = st.text_input("💼 Cargo", key="search_role",
+                                    placeholder="Cargo profesional")
 
     with col_filters[1]:
-        search_date_start = st.date_input("📅 Desde", key="date_start")
-        search_date_end = st.date_input("📅 Hasta", key="date_end")
+        search_date_start = st.date_input("📅 Desde", value=None if not search_date_start else search_date_start,
+                                          key="date_start")
+        search_date_end = st.date_input("📅 Hasta", value=None if not search_date_end else search_date_end,
+                                        key="date_end")
 
-        # Selector de fuentes
-        search_source = st.multiselect("🌐 Fuentes",
-                                       ["all", "people", "email", "social", "domain", "web", "darkweb"],
-                                       default=["people", "email", "social", "darkweb"],
-                                       key="search_sources")
+        # Selector de fuentes (con mejor UX y validación)
+        search_sources = st.multiselect(
+            "🌐 Fuentes",
+            options=["all", "people", "email", "social", "domain", "web", "darkweb"],
+            default=["people", "email", "social", "darkweb"],
+            key="search_sources",
+            help="Selecciona las fuentes a usar en la búsqueda"
+        )
 
     with col_filters[2]:
-        search_relationship = st.selectbox("🔍 Tipo Relación",
-                                           ["Todas", "Colaborador", "Familiar", "Amigo", "Contacto"],
-                                           key="search_relationship")
+        # ✅ Corregido: No se pasa una lista, se pasa un entero
+        relationship_options = ["Todas", "Colaborador", "Familiar", "Amigo", "Contacto"]
+        default_index = 0
 
-        search_confidence = st.slider("🎯 Confianza Mínima", 0.0, 1.0, 0.7, 0.1,
-                                      key="search_confidence")
+        # Buscar índice según valor actual (seguro)
+        current_value = st.session_state.get("search_relationship", "Todas")
+        if current_value in relationship_options:
+            default_index = relationship_options.index(current_value)
 
-    # Grupo de botones de acción
+        search_relationship = st.selectbox(
+            "🔍 Tipo Relación",
+            options=relationship_options,
+            index=default_index,
+            key="search_relationship"
+        )
+
+        search_confidence = st.slider("🎯 Confianza Mínima", 0.0, 1.0, 0.7, step=0.1,
+                                      key="search_confidence",
+                                      help="Mínimo nivel de confianza para mostrar resultados")
+
+    # --- Acciones de búsqueda ---
     st.markdown("### ⚙️ Acciones de Búsqueda")
 
-    col_actions = st.columns(4)
+    col_actions = st.columns(5)
 
     with col_actions[0]:
-        if st.button("🔍 Buscar Personas", use_container_width=True,
-                     key="btn_search", help="Buscar personas con criterios específicos"):
-            # Validar entradas
-            if not any([search_name, search_email, search_location, search_phone, search_domain]):
-                st.warning("Por favor, introduce al menos un criterio de búsqueda")
+        if st.button("🔍 Buscar Personas", use_container_width=True, key="btn_search", help="Buscar personas con criterios"):
+            # Validar al menos un campo no vacío
+            query_input = search_name or search_email or search_location or search_phone or search_domain
+            if not query_input:
+                st.warning("⚠️ Por favor, introduce al menos un criterio de búsqueda.")
                 return
 
-            # Preparar criterios de búsqueda
-            query_data = {
-                "query": search_name or search_email or search_location or search_phone or search_domain,
+            # Construir datos de búsqueda
+            criteria = {
+                "query": query_input,
                 "name": search_name,
                 "email": search_email,
                 "location": search_location,
@@ -123,83 +156,90 @@ def show_person_search_ui():
                 "domain": search_domain,
                 "files": search_files,
                 "company": search_company,
-                "role": search_company_role,
+                "role": search_role,
                 "date_range": {
                     "start": str(search_date_start) if search_date_start else None,
                     "end": str(search_date_end) if search_date_end else None
                 }
             }
 
-            # Ejecutar búsqueda avanzada
             try:
-                with st.spinner("🔍 Realizando búsqueda avanzada con datos reales..."):
-                    # Buscar en múltiples fuentes
-                    selected_sources = [s for s in search_source if
-                                        s != "all"] if "all" in search_source else search_source
+                with st.spinner("🔍 Realizando búsqueda avanzada con múltiples fuentes..."):
+                    # Determinar fuentes reales a usar
+                    selected_sources = [s for s in search_sources if s != "all"] if "all" in search_sources else search_sources
+
+                    # Si no hay fuentes seleccionadas, usar por defecto
                     if not selected_sources:
                         selected_sources = ["people", "email", "social", "domain", "darkweb"]
 
-                    # Verifica si debemos incluir búsqueda de archivo histórico
+                    # Añadir dominio si hay búsqueda por dominio o archivo
                     if search_domain or search_files:
                         if "domain" not in selected_sources:
                             selected_sources.append("domain")
 
-                    # Añadir búsqueda de dark web real si está seleccionada
+                    # Si se selecciona darkweb, hacer búsqueda real
                     if "darkweb" in selected_sources:
-                        # Búsqueda de catálogo oscuro real
                         darkweb_result = search_dark_web_catalog(
-                            query_data["query"],
+                            criteria["query"],
                             search_type="catalog",
                             max_results=5
                         )
                         st.session_state['darkweb_results'] = darkweb_result
 
-                    # Buscar usando los módulos integrados reales
-                    search_results = search_multiple_sources(query_data["query"], selected_sources)
+                    # Ejecutar búsqueda múltiple
+                    search_results = search_multiple_sources(criteria["query"], selected_sources)
 
-                    # Añadir búsqueda histórica si hay dominios
+                    # Añadir historial si hay dominio
                     if search_domain:
-                        # Buscar archivo histórico del dominio
                         archive_results = archive_search.search_web_archives(search_domain, ["wayback", "archive"])
                         search_results["archive_history"] = archive_results
 
-                    # Guardar resultados en sesión
+                    # Guardar en sesión
                     st.session_state['search_results'] = search_results
-                    st.session_state['search_criteria'] = query_data
+                    st.session_state['search_criteria'] = criteria
                     st.session_state['search_timestamp'] = time.time()
 
-                st.success(f"✅ Búsqueda completada con resultados de múltiples fuentes")
+                st.success(f"✅ Búsqueda completada con {len(selected_sources)} fuentes")
 
             except Exception as e:
-                st.error(f"❌ Error en búsqueda: {str(e)}")
-                logger.error(f"Error en búsqueda avanzada: {e}")
+                st.error(f"❌ Error en la búsqueda: {str(e)}")
+                logger.error(f"Error en búsqueda avanzada: {e}", exc_info=True)
 
     with col_actions[1]:
-        if st.button("🔄 Limpiar", use_container_width=True,
-                     key="btn_clear", help="Limpiar todos los campos"):
-            st.session_state['search_name'] = ""
-            st.session_state['search_email'] = ""
-            st.session_state['search_location'] = ""
-            st.session_state['search_phone'] = ""
-            st.session_state['search_company'] = ""
-            st.session_state['search_role'] = ""
+        if st.button("🔄 Limpiar", use_container_width=True, key="btn_clear", help="Limpiar todos los campos"):
+            # Eliminar campos de búsqueda de sesión
+            for key in [
+                "search_name", "search_email", "search_location", "search_phone",
+                "search_domain", "search_files", "search_company", "search_role",
+                "date_start", "date_end", "search_sources", "search_relationship", "search_confidence"
+            ]:
+                st.session_state[key] = ""
             st.session_state['search_results'] = None
             st.session_state['darkweb_results'] = None
-            st.rerun()  # Cambiado de experimental_rerun a rerun
+            st.rerun()
 
     with col_actions[2]:
-        if st.button("🧩 Analizar Relaciones", use_container_width=True,
-                     key="btn_analyze", help="Analizar posibles relaciones"):
-            # Esta función puede requerir datos de personas previamente buscadas
-            st.info("🔍 Función de análisis de relaciones en desarrollo")
+        if st.button("🧩 Analizar Relaciones", use_container_width=True, key="btn_analyze", help="Analizar posibles relaciones"):
+            if st.session_state.get('search_results') is None:
+                st.warning("⚠️ Primero busca personas antes de analizar relaciones")
+                return
+
+            st.info("🔍 Analizando relaciones entre las personas encontradas...")
             st.session_state['page'] = 'relationship_analysis'
             st.session_state['force_reload'] = True
             st.rerun()
 
     with col_actions[3]:
-        if st.button("📊 Exportar Resultados", use_container_width=True,
-                     key="btn_export", help="Exportar resultados a archivo"):
-            st.info("📁 Exportación de resultados en desarrollo")
+        if st.button("📊 Exportar Resultados", use_container_width=True, key="btn_export", help="Exportar resultados a archivo"):
+            if st.session_state.get('search_results') is None:
+                st.warning("⚠️ No hay resultados para exportar")
+                return
+
+            results = st.session_state['search_results']
+            total_count = sum(len(r.get('results', [])) for r in results.values() if isinstance(r, dict) and 'results' in r)
+
+            st.info(f"📥 Exportando {total_count} resultados a archivo... (en desarrollo)")
+            # Aquí se implementaría la exportación (CSV, JSON, etc.)
 
     # Mostrar resultados si existen
     if 'search_results' in st.session_state and st.session_state['search_results']:
@@ -209,7 +249,6 @@ def show_person_search_ui():
         results = st.session_state['search_results']
         total_count = 0
 
-        # Mostrar resultados organizados por fuente
         for source_type, source_results in results.items():
             if isinstance(source_results, dict) and source_results.get('error'):
                 st.markdown(f"""
@@ -220,14 +259,13 @@ def show_person_search_ui():
                 continue
 
             try:
-                # Procesar resultados por tipo
+                # Personas
                 if source_type == 'people' and isinstance(source_results, dict) and 'results' in source_results:
                     st.markdown(f"### 👥 Resultados de Personas")
                     person_results = source_results['results']
                     total_count += len(person_results)
 
                     for i, person in enumerate(person_results):
-                        # Card moderno para cada persona
                         if isinstance(person, dict) and 'name' in person:
                             person_name = person.get('name', 'Nombre desconocido')
                             person_email = person.get('email', 'N/A')
@@ -266,18 +304,23 @@ def show_person_search_ui():
                             """
                             st.markdown(person_card, unsafe_allow_html=True)
 
+                # Emails
                 elif source_type == 'email' and isinstance(source_results, dict) and 'results' in source_results:
                     st.markdown(f"### 📧 Resultados de Email")
-                    # Mostrar resultados de email
                     email_results = source_results['results']
                     total_count += len(email_results)
 
                     for i, email_info in enumerate(email_results):
-                        # Mostrar información real del email
-                        email_value = email_info.get('email', 'Email')
-                        breach_value = email_info.get('breached', False) or email_info.get('breach_count', 0) > 0
-                        breach_count = email_info.get('breach_count', 0)
-                        sources_list = str(email_info.get('sources', [])) if 'sources' in email_info else 'API'
+                        if isinstance(email_info, dict):
+                            email_value = email_info.get('email', 'Email')
+                            breach_value = email_info.get('breached', False) or email_info.get('breach_count', 0) > 0
+                            breach_count = email_info.get('breach_count', 0)
+                            sources_list = str(email_info.get('sources', [])) if 'sources' in email_info else 'API'
+                        else:
+                            email_value = "Error de búsqueda"
+                            breach_value = False
+                            breach_count = 0
+                            sources_list = "N/A"
 
                         email_card = f"""
                         <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 15px; margin-bottom: 10px; 
@@ -297,13 +340,13 @@ def show_person_search_ui():
                         """
                         st.markdown(email_card, unsafe_allow_html=True)
 
+                # Redes sociales
                 elif source_type == 'social' and isinstance(source_results, dict) and 'results' in source_results:
                     st.markdown(f"### 📱 Resultados de Redes Sociales")
                     social_results = source_results['results']
                     total_count += len(social_results)
 
                     for i, social_data in enumerate(social_results):
-                        # Mostrar resultados reales de redes sociales
                         username_value = social_data.get('username', 'Usuario')
                         platform_value = social_data.get('platform', 'N/A')
                         followers_value = social_data.get('followers', 'N/A')
@@ -333,14 +376,14 @@ def show_person_search_ui():
                         """
                         st.markdown(social_card, unsafe_allow_html=True)
 
-                # Mostrar resultados historiales si existen
+                # Historial
                 elif source_type == 'archive_history':
                     st.markdown(f"### 📜 Historial Histórico")
                     if isinstance(source_results, dict):
                         for archive_source, archive_results in source_results.items():
                             if isinstance(archive_results, list) and archive_results:
                                 st.markdown(f"#### {archive_source.upper()} Capturas")
-                                for i, capture in enumerate(archive_results[:3]):  # Solo mostrar 3 por página
+                                for i, capture in enumerate(archive_results[:3]):
                                     if 'error' not in capture and 'url' in capture:
                                         details = capture.get('timestamp_human', capture.get('url', 'Unknown'))
                                         st.markdown(f"""
@@ -354,7 +397,7 @@ def show_person_search_ui():
                                         </div>
                                         """, unsafe_allow_html=True)
 
-                # Mostrar resultados de darkweb si existen
+                # Dark Web
                 elif source_type == 'darkweb' and st.session_state.get('darkweb_results'):
                     st.markdown(f"### 🔍 Resultados Dark Web")
                     dark_results = st.session_state['darkweb_results']
@@ -362,7 +405,7 @@ def show_person_search_ui():
                         for engine_name, engine_results in dark_results['raw_results'].items():
                             if isinstance(engine_results, list) and engine_results:
                                 with st.expander(f"🔍 {engine_name}"):
-                                    for i, result in enumerate(engine_results[:3]):  # Solo 3 resultados
+                                    for j, result in enumerate(engine_results[:3]):
                                         if 'title' in result:
                                             st.markdown(f"""
                                             <div style="border-left: 4px solid #e74c3c; padding: 10px; margin: 10px 0;">
@@ -376,68 +419,79 @@ def show_person_search_ui():
             except Exception as e:
                 st.warning(f"Error al mostrar resultados de {source_type}: {str(e)}")
 
-        # Mostrar estadísticas de búsqueda
+        # Mostrar estadísticas
         if total_count > 0:
             st.markdown(f"### 📊 Estadísticas")
             st.info(f"🔍 Total de resultados encontrados: **{total_count}**")
             st.success("✅ Búsqueda realizada con éxito!")
 
-    # Sección de análisis de relaciones
+    # Análisis de relaciones
     if 'search_results' in st.session_state and st.session_state['search_results']:
         st.markdown("---")
         st.subheader("🔗 Análisis de Relaciones")
 
         with st.expander("🔍 Analizar posibles relaciones", expanded=False):
-            st.write("Analiza automáticamente posibles conexiones entre personas encontradas:")
+            st.write("Detecta automáticamente conexiones entre personas encontradas:")
 
             if st.button("🔍 Encontrar Conexiones", key="find_connections_btn"):
-                # Ejemplo de usar el sistema de conexiones
-                st.info("🔄 Procesando conexiones posibles...")
-                # Aquí iría conexión real con el sistema de relaciones
+                try:
+                    st.info("🔄 Buscando conexiones entre personas...")
+                    connections = find_connections(st.session_state['search_results'])
+                    if connections:
+                        for conn in connections:
+                            st.success(f"🔍 Conexión encontrada: {conn}")
+                    else:
+                        st.warning("No se encontraron conexiones significativas.")
+                except Exception as e:
+                    st.error(f"Error al encontrar conexiones: {e}")
 
             if st.button("🔗 Detectar Tipos", key="detect_types_btn"):
-                st.info("🔎 Detectando tipos de relación...")
-                # Aquí iría detección real
+                try:
+                    st.info("🔎 Detectando tipos de relación...")
+                    suggested = suggest_relationships(st.session_state['search_results'])
+                    if suggested:
+                        for rel_type, persons in suggested.items():
+                            st.info(f"💡 Sugerencia: {rel_type} entre {', '.join(p['name'] for p in persons)}")
+                    else:
+                        st.info("No se detectaron relaciones específicas.")
+                except Exception as e:
+                    st.error(f"Error al detectar relaciones: {e}")
 
-    # Sección adicional para estado de conexión Tor
-    # En la parte inferior del archivo, antes del botón de volver
+    # Estado de Tor y dark web
     if 'search_results' in st.session_state and st.session_state['search_results']:
         st.markdown("---")
         st.subheader("📡 Estado de Conexión")
 
-        # Verificar estado del proxy Tor
         try:
             tor_status = check_onion_connectivity()
             if tor_status:
-                st.success("✅ Conexión Tor estática: ACTIVA")
-                # Mostrar IP actual si está disponible
+                st.success("✅ Conexión Tor: ACTIVA")
                 from utils.tor_proxy import get_tor_ip
                 ip_info = get_tor_ip()
                 if ip_info.get('ip'):
                     st.info(f"IP Anónima: {ip_info['ip']}")
             else:
                 st.warning("⚠️ Conexión Tor: NO DISPONIBLE")
-                st.info("Para protección completa, asegúrate de tener Tor corriendo en 127.0.0.1:9050")
+                st.info("Asegúrate de que Tor esté corriendo en 127.0.0.1:9050.")
 
         except Exception as e:
-            st.warning(f"⚠️ Error verificando conexión: {e}")
+            st.warning(f"⚠️ Error verificando conexión Tor: {e}")
 
-        # Mostrar estadísticas del dark web
         try:
             stats = get_darkweb_stats()
             st.markdown("### 🌐 Estadísticas de Dark Web")
-            st.info(f"🟢 Conexión Onion: {'ACTIVA' if stats['tor_connectivity'] else 'DESACTIVADA'}")
-            st.info(f"📚 Motores disponibles: {stats['supported_sources']}/{stats['total_sources']}")
+            st.info(f"🟢 Conexión Onion: {'ACTIVA' if stats.get('tor_connectivity', False) else 'DESACTIVADA'}")
+            st.info(f"📚 Motores disponibles: {stats.get('supported_sources', 0)}/{stats.get('total_sources', 0)}")
         except Exception as e:
-            st.info("📊 Estadísticas no disponibles temporalmente")
+            st.info("📊 No se pudieron cargar estadísticas de dark web.")
 
-        # Recomendaciones
+        # Recomendaciones de seguridad
         st.markdown("### 🔐 Recomendaciones de Seguridad")
         st.info("""
-        - Asegúrate que Tor está corriendo en la máquina
-        - Configura las claves de API en la sección de configuración
-        - Los datos sensibles deben analizarse en modo anónimo
-        - Cambia tu identidad de Tor periódicamente
+        - Asegúrate de tener Tor corriendo en tu máquina (127.0.0.1:9050)
+        - Usa claves API con acceso mínimo
+        - Analiza datos sensibles en entornos anónimos
+        - Cambia tu identidad de Tor periódicamente para mantener privacidad
         """)
 
     # Botón para volver al dashboard

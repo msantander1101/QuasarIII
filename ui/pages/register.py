@@ -15,13 +15,14 @@ def show_register_page():
 
     st.markdown("""
         <div style="
-            display: flex; 
-            justify-content: center; 
-            align-items: center; 
+            display: flex;
+            justify-content: center;
+            align-items: center;
             min-height: 100vh;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            /* Dejar el fondo transparente para mostrar el fondo global */
+            background: transparent;
         ">
-            <div style="width: 100%; max-width: 400px; padding: 30px; background: white; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
+            <div style="width: 100%; max-width: 400px; padding: 30px; background: #ffffff; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.15);">
                 <div style="text-align: center; margin-bottom: 30px;">
                     <h2 style="color: #495057; margin: 0; font-size: 28px;">🆕 Registrar Cuenta</h2>
                     <p style="color: #6c757d; margin-top: 10px;">Crea tu cuenta profesional</p>

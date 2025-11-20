@@ -39,6 +39,7 @@ def render_sidebar():
         "📊 Dashboard": "dashboard",
         "🔍 Búsqueda Avanzada": "person_search",
         "🧠 Visualizar Grafo": "graph_visualization",
+        "👥 SOCMINT": "social_search",
         "📄 Reportes": "report_generation",
         "⚙️ Configuración": "settings"
     }
@@ -57,6 +58,7 @@ def render_sidebar():
     • Usa la barra de búsqueda para hallar información
     • Guarda personas importantes para análisis posteriores
     • Explora el grafo de relaciones para conectar información
+    • Configura tus claves API para búsquedas avanzadas
     """)
 
     st.markdown("---")

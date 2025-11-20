@@ -1,5 +1,3 @@
-# ui/main.py
-
 import streamlit as st
 import os, sys
 
@@ -23,6 +21,18 @@ from ui.pages.report_generation import show_report_generation_page
 
 # Importa helpers y utilidades
 from ui.utils.helpers import get_current_user_id, set_current_user_id, clear_session
+
+from modules.search.darkweb import (
+    search_dark_web_catalog,
+    search_paste_content,
+    search_documents,
+    search_marketplaces,
+    get_available_onion_search_engines,
+    check_onion_connectivity,
+    get_darkweb_stats
+)
+# Importar desde socmint
+from modules.search.socmint import search_social_profiles, analyze_social_profile, get_social_network_graph
 
 # Importa el logger
 from utils.logger import setup_logger

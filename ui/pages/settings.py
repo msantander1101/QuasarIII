@@ -48,9 +48,16 @@ def show_settings_page():
         "hibp": "💀 Have I Been Pwned",
         "hunter": "📧 Hunter.io",
         "whoisxml": "🌍 WhoisXML API",
-        "shodan": "🕸️ Shodan",
+        "shodan": "🕷️ Shodan",
         "virustotal": "🧬 VirusTotal",
-        "openai_api_key": "🧠 OpenAI / GPT API Key"
+        "openai_api_key": "🧠 OpenAI / GPT API Key",
+        "instagram_api_key": "📸 Instagram API",
+        "tiktok_api_key": "🎵 TikTok API",
+        "youtube_api_key": "📺 YouTube API",
+        "twitter_api_key": "🐦 Twitter API",
+        "linkedin_api_key": "💼 LinkedIn API",
+        "facebook_api_key": "📘 Facebook API",
+        "reddit_api_key": "📊 Reddit API"
     }
 
     st.markdown("#### ✅ Configuración Actual")
@@ -96,7 +103,14 @@ def show_settings_page():
         "whoisxml": "Clave API para WhoisXML (WHOIS information)",
         "shodan": "Clave API para Shodan (network scanner)",
         "virustotal": "Clave API para VirusTotal (malware detection)",
-        "openai_api_key": "Clave API para OpenAI/GPT (IA integrada)"
+        "openai_api_key": "Clave API para OpenAI/GPT (IA integrada)",
+        "instagram_api_key": "Clave API para Instagram (integración SOCMINT)",
+        "tiktok_api_key": "Clave API para TikTok (integración SOCMINT)",
+        "youtube_api_key": "Clave API para YouTube (integración SOCMINT)",
+        "twitter_api_key": "Clave API para Twitter (integración SOCMINT)",
+        "linkedin_api_key": "Clave API para LinkedIn (integración SOCMINT)",
+        "facebook_api_key": "Clave API para Facebook (integración SOCMINT)",
+        "reddit_api_key": "Clave API para Reddit (integración SOCMINT)"
     }
 
     if st.button("💾 Guardar Clave API", key="save_api_button"):
@@ -111,7 +125,7 @@ def show_settings_page():
         else:
             st.warning("⚠️ Por favor ingresa el tipo de clave y su valor.")
 
-            # --- Eliminar claves existentes ---
+    # --- Eliminar claves existentes ---
     st.markdown("### ❌ Eliminar Clave API Existente")
 
     # Mostrar claves existentes para eliminar
@@ -139,7 +153,12 @@ def show_settings_page():
 
     required_keys = [
         "hibp",  # Obligatoria para verificación de emails
-        "openai_api_key"  # Obligatoria para AI integrada
+        "openai_api_key",  # Obligatoria para AI integrada
+        "instagram_api_key",
+        "tiktok_api_key",
+        "youtube_api_key",
+        "twitter_api_key",
+        "linkedin_api_key"
     ]
 
     required_status = {key: config_manager.get_config(user_id, key) for key in required_keys}
@@ -165,6 +184,7 @@ def show_settings_page():
     - Verificar información de dominios con WhoisXML
     - Hacer búsquedas de personas con Hunter.io
     - Usar inteligencia artificial con OpenAI/GPT
+    - Realizar búsquedas en redes sociales con integación SOCMINT
     """)
 
     # Botón para volver al dashboard

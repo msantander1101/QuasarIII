@@ -15,6 +15,13 @@ class ConfigManager:
             "hibp",  # Para verificar breach de emails
             "openai_api_key", # Para uso de IA
             "google_api_key", # Para búsqueda web avanzada
+            "instagram_api_key",
+            "tiktok_api_key",
+            "youtube_api_key",
+            "twitter_api_key",
+            "linkedin_api_key",
+            "facebook_api_key",
+            "reddit_api_key"
         ]
         # Puedes añadir más configuraciones requeridas aquí
 
@@ -79,6 +86,10 @@ class ConfigManager:
         Devuelve la lista de claves necesarias (requeridas por la app).
         """
         return self.required_configs.copy()  # Devuelve una copia para evitar modificaciones externas
+
+    def get_social_api_key(self, user_id: int, platform: str) -> str:
+        """Obtiene clave API para SOCMINT de plataforma específica"""
+        return self.get_config(user_id, f"socmint_{platform}")
 
 # Exporta una instancia única por conveniencia (como en core/auth_manager.py)
 config_manager = ConfigManager()

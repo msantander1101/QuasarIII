@@ -9,7 +9,9 @@ from . import (
     general_search,
     people_search,
     emailint,
-    socmint
+    socmint,
+    darkweb,
+    archive_search,
 )
 
 logger = logging.getLogger(__name__)

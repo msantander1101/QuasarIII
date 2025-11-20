@@ -5,6 +5,7 @@ from modules.search.advanced_search import search_multiple_sources, search_with_
 from modules.search.relationship_search import suggest_relationships, find_connections
 from modules.search.emailint import check_email_breach
 from modules.search import archive_search
+from modules.search.darkweb import search_dark_web_catalog, get_available_onion_search_engines, check_onion_connectivity, get_darkweb_stats
 from core.db_manager import create_person, get_persons_by_user
 import json
 import logging
@@ -87,8 +88,8 @@ def show_person_search_ui():
 
         # Selector de fuentes
         search_source = st.multiselect("🌐 Fuentes",
-                                       ["all", "people", "email", "social", "domain", "web"],
-                                       default=["people", "email", "social"],
+                                       ["all", "people", "email", "social", "domain", "web", "darkweb"],
+                                       default=["people", "email", "social", "darkweb"],
                                        key="search_sources")
 
     with col_filters[2]:
@@ -136,14 +137,24 @@ def show_person_search_ui():
                     selected_sources = [s for s in search_source if
                                         s != "all"] if "all" in search_source else search_source
                     if not selected_sources:
-                        selected_sources = ["people", "email", "social", "domain"]
+                        selected_sources = ["people", "email", "social", "domain", "darkweb"]
 
                     # Verifica si debemos incluir búsqueda de archivo histórico
                     if search_domain or search_files:
                         if "domain" not in selected_sources:
                             selected_sources.append("domain")
 
-                    # Buscar usando los módulos integrados reales con las APIs configuradas
+                    # Añadir búsqueda de dark web real si está seleccionada
+                    if "darkweb" in selected_sources:
+                        # Búsqueda de catálogo oscuro real
+                        darkweb_result = search_dark_web_catalog(
+                            query_data["query"],
+                            search_type="catalog",
+                            max_results=5
+                        )
+                        st.session_state['darkweb_results'] = darkweb_result
+
+                    # Buscar usando los módulos integrados reales
                     search_results = search_multiple_sources(query_data["query"], selected_sources)
 
                     # Añadir búsqueda histórica si hay dominios
@@ -173,6 +184,7 @@ def show_person_search_ui():
             st.session_state['search_company'] = ""
             st.session_state['search_role'] = ""
             st.session_state['search_results'] = None
+            st.session_state['darkweb_results'] = None
             st.rerun()  # Cambiado de experimental_rerun a rerun
 
     with col_actions[2]:
@@ -209,126 +221,117 @@ def show_person_search_ui():
 
             try:
                 # Procesar resultados por tipo
-                if source_type == 'people' and isinstance(source_results, dict):
+                if source_type == 'people' and isinstance(source_results, dict) and 'results' in source_results:
                     st.markdown(f"### 👥 Resultados de Personas")
-                    if 'results' in source_results:
-                        person_results = source_results['results']
-                        total_count += len(person_results)
+                    person_results = source_results['results']
+                    total_count += len(person_results)
 
-                        for i, person in enumerate(person_results):
-                            # Card moderno para cada persona
-                            if isinstance(person, dict) and 'name' in person:
-                                person_name = person.get('name', 'Nombre desconocido')
-                                person_email = person.get('email', 'N/A')
-                                person_phone = person.get('phone', 'N/A')
-                                person_location = person.get('location', 'N/A')
-                                person_confidence = person.get('confidence', 0.8)
+                    for i, person in enumerate(person_results):
+                        # Card moderno para cada persona
+                        if isinstance(person, dict) and 'name' in person:
+                            person_name = person.get('name', 'Nombre desconocido')
+                            person_email = person.get('email', 'N/A')
+                            person_phone = person.get('phone', 'N/A')
+                            person_location = person.get('location', 'N/A')
+                            person_confidence = person.get('confidence', 0.8)
 
-                                person_card = f"""
-                                <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 20px; margin-bottom: 15px; 
-                                           background: white; box-shadow: 0 3px 10px rgba(0,0,0,0.08);">
-                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                        <div>
-                                            <h3 style="margin: 0; color: #2c3e50; font-size: 18px;">{person_name}</h3>
-                                            <p style="color: #7f8c8d; margin: 5px 0; font-size: 14px;">
-                                                <strong>Email:</strong> {person_email}<br/>
-                                                <strong>Teléfono:</strong> {person_phone}<br/>
-                                                <strong>Ubicación:</strong> {person_location}
-                                            </p>
-                                        </div>
-                                        <div style="text-align: right;">
-                                            <span style="display: block; background: #28a745; color: white; 
-                                                       padding: 5px 10px; border-radius: 15px; font-size: 12px;">
-                                                ⭐ {person_confidence:.2f}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <div style="display: flex; gap: 10px;">
-                                        <button onclick="handleSavePerson('{json.dumps(person).replace(chr(34), '&quot;')}')" 
-                                                style="background: #28a745; color: white; border: none; padding: 8px 15px; 
-                                                       border-radius: 6px; cursor: pointer; font-size: 14px;" 
-                                                class="save-btn-{i}">
-                                            ✅ Guardar Persona
-                                        </button>
-                                        <button onclick="handleAnalyzeRelationship('{json.dumps(person).replace(chr(34), '&quot;')}')" 
-                                                style="background: #17a2b8; color: white; border: none; padding: 8px 15px; 
-                                                       border-radius: 6px; cursor: pointer; font-size: 14px;" 
-                                                class="analyze-btn-{i}">
-                                            🔍 Analizar Relación
-                                        </button>
-                                    </div>
-                                </div>
-                                """
-                                st.markdown(person_card, unsafe_allow_html=True)
-
-                elif source_type == 'email' and isinstance(source_results, dict):
-                    st.markdown(f"### 📧 Resultados de Email")
-                    # Mostrar resultados de email
-                    if 'results' in source_results:
-                        email_results = source_results['results']
-                        total_count += len(email_results)
-
-                        for i, email_info in enumerate(email_results):
-                            # Mostrar información real del email
-                            email_value = email_info.get('email', 'Email')
-                            breach_value = email_info.get('breached', False) or email_info.get('breach_count', 0) > 0
-                            breach_count = email_info.get('breach_count', 0)
-                            sources_list = str(email_info.get('sources', [])) if 'sources' in email_info else 'API'
-
-                            email_card = f"""
-                            <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 15px; margin-bottom: 10px; 
-                                       background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
-                                <div style="display: flex; justify-content: space-between;">
-                                    <h4 style="margin: 0; color: #2c3e50;">{email_value}</h4>
-                                    <span style="background: {'#28a745' if breach_value or breach_count > 0 else '#ffc107'}; 
-                                               color: white; padding: 3px 8px; border-radius: 10px; font-size: 12px;">
-                                        {'Comprometido' if breach_value or breach_count > 0 else 'Seguro'}
-                                    </span>
-                                </div>
-                                <p style="color: #7f8c8d; margin: 5px 0; font-size: 14px;">
-                                    <strong>Breaches:</strong> {breach_count}<br/>
-                                    <strong>Fuente:</strong> {sources_list}
-                                </p>
-                            </div>
-                            """
-                            st.markdown(email_card, unsafe_allow_html=True)
-
-                elif source_type == 'social' and isinstance(source_results, dict):
-                    st.markdown(f"### 📱 Resultados de Redes Sociales")
-                    if 'results' in source_results:
-                        social_results = source_results['results']
-                        total_count += len(social_results)
-
-                        for i, social_data in enumerate(social_results):
-                            # Mostrar resultados reales de redes sociales
-                            username_value = social_data.get('username', 'Usuario')
-                            platform_value = social_data.get('platform', 'N/A')
-                            followers_value = social_data.get('followers', 'N/A')
-                            posts_value = social_data.get('posts', 'N/A')
-                            verified_value = social_data.get('verified', False)
-
-                            social_card = f"""
-                            <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 15px; margin-bottom: 10px; 
-                                       background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
-                                <div style="display: flex; align-items: center;">
-                                    <div style="flex: 1;">
-                                        <h4 style="margin: 0; color: #2c3e50;">@{username_value}</h4>
+                            person_card = f"""
+                            <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 20px; margin-bottom: 15px; 
+                                       background: white; box-shadow: 0 3px 10px rgba(0,0,0,0.08);">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <div>
+                                        <h3 style="margin: 0; color: #2c3e50; font-size: 18px;">{person_name}</h3>
                                         <p style="color: #7f8c8d; margin: 5px 0; font-size: 14px;">
-                                            <strong>Plataforma:</strong> {platform_value}<br/>
-                                            <strong>Seguidores:</strong> {followers_value}<br/>
-                                            <strong>Posteos:</strong> {posts_value}
+                                            <strong>Email:</strong> {person_email}<br/>
+                                            <strong>Teléfono:</strong> {person_phone}<br/>
+                                            <strong>Ubicación:</strong> {person_location}
                                         </p>
                                     </div>
                                     <div style="text-align: right;">
-                                        <span style="display: block; background: #007bff; color: white; 
+                                        <span style="display: block; background: #28a745; color: white; 
                                                    padding: 5px 10px; border-radius: 15px; font-size: 12px;">
-                                            {'Verificado' if verified_value else 'No verificado'}
+                                            ⭐ {person_confidence:.2f}
                                         </span>
                                     </div>
                                 </div>
+                                <div style="display: flex; gap: 10px;">
+                                    <button onclick="handleSavePerson('{json.dumps(person).replace(chr(34), '&quot;')}')" 
+                                            style="background: #28a745; color: white; border: none; padding: 8px 15px; 
+                                                   border-radius: 6px; cursor: pointer; font-size: 14px;" 
+                                            class="save-btn-{i}">
+                                        ✅ Guardar Persona
+                                    </button>
+                                </div>
                             </div>
                             """
-                            st.markdown(social_card, unsafe_allow_html=True)
+                            st.markdown(person_card, unsafe_allow_html=True)
+
+                elif source_type == 'email' and isinstance(source_results, dict) and 'results' in source_results:
+                    st.markdown(f"### 📧 Resultados de Email")
+                    # Mostrar resultados de email
+                    email_results = source_results['results']
+                    total_count += len(email_results)
+
+                    for i, email_info in enumerate(email_results):
+                        # Mostrar información real del email
+                        email_value = email_info.get('email', 'Email')
+                        breach_value = email_info.get('breached', False) or email_info.get('breach_count', 0) > 0
+                        breach_count = email_info.get('breach_count', 0)
+                        sources_list = str(email_info.get('sources', [])) if 'sources' in email_info else 'API'
+
+                        email_card = f"""
+                        <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 15px; margin-bottom: 10px; 
+                                   background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                            <div style="display: flex; justify-content: space-between;">
+                                <h4 style="margin: 0; color: #2c3e50;">{email_value}</h4>
+                                <span style="background: {'#28a745' if breach_value or breach_count > 0 else '#ffc107'}; 
+                                           color: white; padding: 3px 8px; border-radius: 10px; font-size: 12px;">
+                                    {'Comprometido' if breach_value or breach_count > 0 else 'Seguro'}
+                                </span>
+                            </div>
+                            <p style="color: #7f8c8d; margin: 5px 0; font-size: 14px;">
+                                <strong>Breaches:</strong> {breach_count}<br/>
+                                <strong>Fuente:</strong> {sources_list}
+                            </p>
+                        </div>
+                        """
+                        st.markdown(email_card, unsafe_allow_html=True)
+
+                elif source_type == 'social' and isinstance(source_results, dict) and 'results' in source_results:
+                    st.markdown(f"### 📱 Resultados de Redes Sociales")
+                    social_results = source_results['results']
+                    total_count += len(social_results)
+
+                    for i, social_data in enumerate(social_results):
+                        # Mostrar resultados reales de redes sociales
+                        username_value = social_data.get('username', 'Usuario')
+                        platform_value = social_data.get('platform', 'N/A')
+                        followers_value = social_data.get('followers', 'N/A')
+                        posts_value = social_data.get('posts', 'N/A')
+                        verified_value = social_data.get('verified', False)
+
+                        social_card = f"""
+                        <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 15px; margin-bottom: 10px; 
+                                   background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                            <div style="display: flex; align-items: center;">
+                                <div style="flex: 1;">
+                                    <h4 style="margin: 0; color: #2c3e50;">@{username_value}</h4>
+                                    <p style="color: #7f8c8d; margin: 5px 0; font-size: 14px;">
+                                        <strong>Plataforma:</strong> {platform_value}<br/>
+                                        <strong>Seguidores:</strong> {followers_value}<br/>
+                                        <strong>Posteos:</strong> {posts_value}
+                                    </p>
+                                </div>
+                                <div style="text-align: right;">
+                                    <span style="display: block; background: #007bff; color: white; 
+                                               padding: 5px 10px; border-radius: 15px; font-size: 12px;">
+                                        {'Verificado' if verified_value else 'No verificado'}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        """
+                        st.markdown(social_card, unsafe_allow_html=True)
 
                 # Mostrar resultados historiales si existen
                 elif source_type == 'archive_history':
@@ -350,6 +353,25 @@ def show_person_search_ui():
                                             {f'<p style="color: #7f8c8d; font-size: 14px;">Confianza: {capture.get("confidence", 0.9):.2f}</p>' if 'confidence' in capture else ''}
                                         </div>
                                         """, unsafe_allow_html=True)
+
+                # Mostrar resultados de darkweb si existen
+                elif source_type == 'darkweb' and st.session_state.get('darkweb_results'):
+                    st.markdown(f"### 🔍 Resultados Dark Web")
+                    dark_results = st.session_state['darkweb_results']
+                    if 'raw_results' in dark_results:
+                        for engine_name, engine_results in dark_results['raw_results'].items():
+                            if isinstance(engine_results, list) and engine_results:
+                                with st.expander(f"🔍 {engine_name}"):
+                                    for i, result in enumerate(engine_results[:3]):  # Solo 3 resultados
+                                        if 'title' in result:
+                                            st.markdown(f"""
+                                            <div style="border-left: 4px solid #e74c3c; padding: 10px; margin: 10px 0;">
+                                                <h4 style="color: #e74c3c; margin: 0;">{result.get('title', 'Título sin especificar')}</h4>
+                                                <p style="color: #6c757d; margin: 5px 0;"><strong>Fuente:</strong> {result.get('source', 'Desconocida')}</p>
+                                                <p style="margin: 0;">{result.get('description', 'Sin descripción')}</p>
+                                                <a href="{result.get('url', '#')}" target="_blank" style="color: #3498db;">Ver detalles</a>
+                                            </div>
+                                            """, unsafe_allow_html=True)
 
             except Exception as e:
                 st.warning(f"Error al mostrar resultados de {source_type}: {str(e)}")
@@ -377,8 +399,50 @@ def show_person_search_ui():
                 st.info("🔎 Detectando tipos de relación...")
                 # Aquí iría detección real
 
+    # Sección adicional para estado de conexión Tor
+    # En la parte inferior del archivo, antes del botón de volver
+    if 'search_results' in st.session_state and st.session_state['search_results']:
+        st.markdown("---")
+        st.subheader("📡 Estado de Conexión")
+
+        # Verificar estado del proxy Tor
+        try:
+            tor_status = check_onion_connectivity()
+            if tor_status:
+                st.success("✅ Conexión Tor estática: ACTIVA")
+                # Mostrar IP actual si está disponible
+                from utils.tor_proxy import get_tor_ip
+                ip_info = get_tor_ip()
+                if ip_info.get('ip'):
+                    st.info(f"IP Anónima: {ip_info['ip']}")
+            else:
+                st.warning("⚠️ Conexión Tor: NO DISPONIBLE")
+                st.info("Para protección completa, asegúrate de tener Tor corriendo en 127.0.0.1:9050")
+
+        except Exception as e:
+            st.warning(f"⚠️ Error verificando conexión: {e}")
+
+        # Mostrar estadísticas del dark web
+        try:
+            stats = get_darkweb_stats()
+            st.markdown("### 🌐 Estadísticas de Dark Web")
+            st.info(f"🟢 Conexión Onion: {'ACTIVA' if stats['tor_connectivity'] else 'DESACTIVADA'}")
+            st.info(f"📚 Motores disponibles: {stats['supported_sources']}/{stats['total_sources']}")
+        except Exception as e:
+            st.info("📊 Estadísticas no disponibles temporalmente")
+
+        # Recomendaciones
+        st.markdown("### 🔐 Recomendaciones de Seguridad")
+        st.info("""
+        - Asegúrate que Tor está corriendo en la máquina
+        - Configura las claves de API en la sección de configuración
+        - Los datos sensibles deben analizarse en modo anónimo
+        - Cambia tu identidad de Tor periódicamente
+        """)
+
     # Botón para volver al dashboard
     if st.button(" ← Volver al Dashboard", use_container_width=True):
         st.session_state['page'] = 'dashboard'
         st.session_state['search_results'] = None
+        st.session_state['darkweb_results'] = None
         st.rerun()

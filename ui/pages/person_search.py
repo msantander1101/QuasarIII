@@ -6,6 +6,7 @@ from modules.search.relationship_search import suggest_relationships, find_conne
 from modules.search.emailint import check_email_breach
 from modules.search import archive_search
 from modules.search.darkweb import search_dark_web_catalog, get_available_onion_search_engines, check_onion_connectivity, get_darkweb_stats
+from modules.search.pastesearch import search_paste_sites, search_leaks
 from core.db_manager import create_person, get_persons_by_user
 import json
 import logging
@@ -20,15 +21,15 @@ def show_person_search_ui():
     Interfaz moderna y robusta con búsqueda avanzada multifuncional.
     Mejora en claridad, seguridad, manejo de errores, UX y escalabilidad.
     """
-    # Header moderno con diseño SaaS y fondo oscuro
-    # Cabecera con degradado en tonos azules para un aspecto más profesional
+    # Header moderno con diseño SaaS y fondo oscuro (azul profesional)
     st.markdown("""
         <div style="background: linear-gradient(135deg, #3a7bd5 0%, #004e92 100%);
-                    padding: 25px; border-radius: 15px; margin-bottom: 25px; box-shadow: 0 8px 25px rgba(0,0,0,0.15);">
-            <h1 style="color: white; text-align: center; margin: 0; font-size: 28px;">
+                    padding: 25px; border-radius: 15px; margin-bottom: 25px; 
+                    box-shadow: 0 8px 25px rgba(0,0,0,0.15); border: 1px solid #1a1a2e;">
+            <h1 style="color: white; text-align: center; margin: 0; font-size: 28px; font-weight: 600;">
                 🚀 Búsqueda Avanzada Multifuncional
             </h1>
-            <p style="color: rgba(255,255,255,0.85); text-align: center; margin: 15px 0; font-size: 16px;">
+            <p style="color: rgba(255,255,255,0.85); text-align: center; margin: 15px 0; font-size: 16px; font-weight: 300;">
                 Búsqueda inteligente, conexiones automáticas y análisis completo y seguro.
             </p>
         </div>
@@ -107,7 +108,7 @@ def show_person_search_ui():
         search_sources = st.multiselect(
             "🌐 Fuentes",
             options=["all", "people", "email", "social", "domain", "web", "darkweb"],
-            default=["people", "email", "social", "darkweb"],
+            default=["all"],
             key="search_sources",
             help="Selecciona las fuentes a usar en la búsqueda"
         )
@@ -166,7 +167,10 @@ def show_person_search_ui():
             try:
                 with st.spinner("🔍 Realizando búsqueda avanzada con múltiples fuentes..."):
                     # Determinar fuentes reales a usar
-                    selected_sources = [s for s in search_sources if s != "all"] if "all" in search_sources else search_sources
+                    if "all" in search_sources:
+                        selected_sources = ["people", "email", "social", "domain", "web", "darkweb"]
+                    else:
+                        selected_sources = search_sources
 
                     # Si no hay fuentes seleccionadas, usar por defecto
                     if not selected_sources:
@@ -182,7 +186,7 @@ def show_person_search_ui():
                         darkweb_result = search_dark_web_catalog(
                             criteria["query"],
                             search_type="catalog",
-                            max_results=5
+                            max_results=50
                         )
                         st.session_state['darkweb_results'] = darkweb_result
 
@@ -304,6 +308,27 @@ def show_person_search_ui():
                             """
                             st.markdown(person_card, unsafe_allow_html=True)
 
+                    # Mostrar resultados de perfiles sociales (Maigret/Sherlock) si existen
+                    for item in person_results:
+                        if isinstance(item, dict) and 'social_profiles' in item:
+                            social_profiles = item.get('social_profiles', {})
+                            if social_profiles:
+                                st.markdown("### 🌐 Perfiles Sociales (Maigret y Sherlock)")
+                                for tool_name, result_data in social_profiles.items():
+                                    display_name = tool_name.capitalize()
+                                    if isinstance(result_data, dict):
+                                        if 'error' in result_data:
+                                            st.warning(f"{display_name}: {result_data['error']}")
+                                        elif 'warning' in result_data:
+                                            st.info(f"{display_name}: {result_data['warning']}")
+                                        else:
+                                            st.markdown(f"#### {display_name} resultados")
+                                            st.json(result_data)
+                                    else:
+                                        st.markdown(f"#### {display_name} resultados")
+                                        st.json(result_data)
+                            break
+
                 # Emails
                 elif source_type == 'email' and isinstance(source_results, dict) and 'results' in source_results:
                     st.markdown(f"### 📧 Resultados de Email")
@@ -397,6 +422,60 @@ def show_person_search_ui():
                                         </div>
                                         """, unsafe_allow_html=True)
 
+                # Búsqueda Web
+                elif source_type == 'web' and isinstance(source_results, dict) and 'results' in source_results:
+                    st.markdown(f"### 🌍 Resultados Web")
+                    web_results = source_results['results']
+                    total_count += len(web_results)
+                    for i, web_item in enumerate(web_results):
+                        title = web_item.get('title', 'Sin título')
+                        url_val = web_item.get('url', '#')
+                        snippet = web_item.get('snippet', '')
+                        confidence = web_item.get('confidence', 0.0)
+                        web_card = f"""
+                        <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 15px; margin-bottom: 10px; 
+                                   background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                            <h4 style="margin: 0; color: #2c3e50;">{title}</h4>
+                            <p style="color: #7f8c8d; margin: 5px 0; font-size: 14px;">{snippet}</p>
+                            <a href="{url_val}" target="_blank" style="color: #3498db; text-decoration: none; font-size: 14px;">🔗 Abrir enlace</a>
+                            <div style="margin-top: 5px;">
+                                <span style="display: inline-block; background: #17a2b8; color: white; padding: 3px 8px; 
+                                           border-radius: 10px; font-size: 12px;">Confianza: {confidence:.2f}</span>
+                            </div>
+                        </div>
+                        """
+                        st.markdown(web_card, unsafe_allow_html=True)
+
+                # Búsqueda de Dominio
+                elif source_type == 'domain' and isinstance(source_results, dict) and 'results' in source_results:
+                    st.markdown(f"### 🌐 Historial de Dominio")
+                    domain_data = source_results['results']
+                    domain_name = domain_data.get('domain', 'Dominio desconocido')
+                    history = domain_data.get('history', [])
+                    snapshots = domain_data.get('wayback_snapshots', [])
+                    total_history = len(history)
+                    total_snapshots = len(snapshots)
+                    st.markdown(f"**Dominio:** {domain_name}")
+                    st.markdown(f"**Entradas de historial:** {total_history}")
+                    st.markdown(f"**Capturas Wayback:** {total_snapshots}")
+                    if history:
+                        st.markdown("#### Últimas entradas de historial")
+                        for entry in history[:3]:
+                            if isinstance(entry, dict):
+                                entry_text = entry.get('timestamp_human', '') or entry.get('url', '')
+                            else:
+                                entry_text = str(entry)
+                            st.markdown(f"- {entry_text}")
+                    if snapshots:
+                        st.markdown("#### Algunas capturas de Wayback")
+                        for snap in snapshots[:3]:
+                            if isinstance(snap, dict):
+                                snap_url = snap.get('url', '#')
+                                snap_date = snap.get('timestamp_human', '')
+                                st.markdown(f"- [{snap_date or snap_url}]({snap_url})")
+                            else:
+                                st.markdown(f"- {snap}")
+
                 # Dark Web
                 elif source_type == 'darkweb' and st.session_state.get('darkweb_results'):
                     st.markdown(f"### 🔍 Resultados Dark Web")
@@ -428,6 +507,43 @@ def show_person_search_ui():
     # Análisis de relaciones
     if 'search_results' in st.session_state and st.session_state['search_results']:
         st.markdown("---")
+
+        # --- NUEVA SECCIÓN: Resultados de Pases y Leaks ---
+        if 'search_results' in st.session_state and st.session_state['search_results']:
+            st.markdown("---")
+            st.subheader("📎 Resultados de Pases y Leaks")
+
+            query = st.session_state.get('search_name', '') or st.session_state.get('search_email',
+                                                                                    '') or st.session_state.get(
+                'search_domain', '')
+            if not query:
+                st.info("🔍 No se encontraron resultados de paste o leaks (no se ha buscado un término clave)")
+                return
+
+            # 🔍 Llama a la función de búsqueda real
+            paste_results = search_paste_sites(query)
+
+            if paste_results:
+                st.markdown("### 🔍 Resultados en Pastes y Leaks")
+                for i, result in enumerate(paste_results):
+                    with st.expander(f"📄 {result['title']} ({result['source']})", expanded=False):
+                        st.markdown(f"""
+                        <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; padding: 15px; color: #e6e6fa;">
+                            <h5 style="margin: 0; color: #ffffff;">{result['title']}</h5>
+                            <p style="color: #b0b0c0; font-size: 14px;">
+                                <strong>Fecha:</strong> {result.get('date', 'Desconocida')}<br/>
+                                <strong>Tamaño:</strong> {result.get('size', 'N/A')}<br/>
+                                <strong>Idioma:</strong> {result.get('language', 'N/A')}<br/>
+                                <strong>Fuente:</strong> {result.get('source', 'N/A')}
+                            </p>
+                            <a href="{result.get('url', '#')}" target="_blank" style="color: #28a745; text-decoration: underline; font-size: 13px;">
+                                🌐 Ver enlace
+                            </a>
+                        </div>
+                        """, unsafe_allow_html=True)
+            else:
+                st.info("🔍 No se encontraron pastes o leaks relevantes para este término.")
+
         st.subheader("🔗 Análisis de Relaciones")
 
         with st.expander("🔍 Analizar posibles relaciones", expanded=False):

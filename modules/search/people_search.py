@@ -88,29 +88,22 @@ class PeopleSearcher:
         - People Search APIs
         - Public Databases
         """
+        """
+        Realiza una búsqueda de perfiles sociales para un nombre dado usando
+        herramientas OSINT (Maigret y Sherlock) y devuelve los resultados
+        encapsulados en una lista.  Si las herramientas no están instaladas,
+        se devolverá una estructura con mensajes de error que se mostrarán
+        en la interfaz.  Esta implementación sustituye los resultados
+        simulados por datos reales o mensajes informativos.
+        """
         try:
-            # Este sería el llamado real a una API como Whitepages, Hunter, etc.
-            # Ejemplo:
-            # url = "https://api.whitepages.com/person-search"
-            # params = {"name": name, "location": location, "api_key": api_key}
-            # response = self.session.get(url, params=params)
-            # return response.json()
-
-            # Simulación de resultados reales cuando se conecte
-            results = []
-            for i in range(min(max_results, 5)):
-                results.append({
-                    "name": f"{name} {chr(65 + i)}",
-                    "email": f"{name.lower()}{chr(97 + i)}@example.com",
-                    "phone": f"+1-555-01{i + 1}",
-                    "location": location or "Ciudad, País",
-                    "source": "Directorio Público",
-                    "confidence": 0.85 - (i * 0.05),  # Mayor confianza en los primeros
-                    "detected_timestamp": time.time() - (i * 86400)  # Días hacia el pasado
-                })
-
-            return results
-
+            if not name:
+                return []
+            # Buscar perfiles sociales utilizando el nombre como identificador.
+            social_profiles = self.search_social_profiles(name)
+            # Devolver los perfiles sociales encapsulados para su posterior
+            # visualización en la interfaz.
+            return [{"social_profiles": social_profiles}]
         except Exception as e:
             logger.error(f"Error en búsqueda por nombre: {e}")
             return [{"error": f"Error de búsqueda: {str(e)}"}]
@@ -123,28 +116,16 @@ class PeopleSearcher:
         - Whitepages API
         - Person Search APIs
         """
+        """
+        Devuelve un diccionario vacío ya que no contamos con un servicio de
+        verificación de correos en este entorno.  Esto evita resultados
+        simulados que pudieran confundir al usuario.
+        """
         try:
-            # Esto sería una llamada real
-            # url = "https://api.hunter.io/v2/email-verifier"
-            # params = {"email": email, "api_key": hunter_api_key}
-            # response = self.session.get(url, params=params)
-
-            # Simulación:
-            return {
-                "email": email,
-                "name": "Nombre Apellido",
-                "phone": "+1-555-0123",
-                "location": "Ciudad, País",
-                "source": "Buscador de correos públicos",
-                "confidence": 0.75,
-                "timestamp": time.time(),
-                "profile_data": {
-                    "linkedin": "https://linkedin.com/in/nombre",
-                    "twitter": "@nombre",
-                    "facebook": "facebook.com/nombre"
-                }
-            }
-
+            # En un escenario real se integrará con servicios de verificación
+            # de correos como Hunter.io, etc. Aquí simplemente devolvemos
+            # un diccionario vacío.
+            return {}
         except Exception as e:
             logger.error(f"Error en búsqueda por email: {e}")
             return {"error": f"Error de búsqueda: {str(e)}"}
@@ -157,23 +138,16 @@ class PeopleSearcher:
         - TruePeople API
         - AnyWho API
         """
+        """
+        Devuelve un diccionario vacío ya que no contamos con un servicio
+        real de búsqueda por teléfono en este entorno.  Se evita así
+        devolver resultados simulados.
+        """
         try:
-            # Simulación (en producción conectaría a APIs reales)
-            return {
-                "phone": phone,
-                "name": "Nombre Apellido",
-                "email": "persona@example.com",
-                "location": "Ciudad, País",
-                "source": "Directorio público de teléfonos",
-                "confidence": 0.70,
-                "timestamp": time.time(),
-                "details": {
-                    "carrier": "Operador de Teléfono",
-                    "type": "móvil",
-                    "region": "Región"
-                }
-            }
-
+            # En un entorno real, este método se conectaría con APIs de
+            # búsqueda de números telefónicos.  Actualmente, devolvemos
+            # un diccionario vacío.
+            return {}
         except Exception as e:
             logger.error(f"Error en búsqueda por teléfono: {e}")
             return {"error": f"Error de búsqueda: {str(e)}"}
@@ -194,12 +168,14 @@ class PeopleSearcher:
 
                 if criteria.get('email'):
                     email_result = self.search_person_by_email(criteria.get('email'))
-                    if isinstance(email_result, dict):
+                    # Solo agregar si el resultado no está vacío
+                    if isinstance(email_result, dict) and email_result:
                         results.append(email_result)
 
                 if criteria.get('phone'):
                     phone_result = self.search_person_by_phone(criteria.get('phone'))
-                    if isinstance(phone_result, dict):
+                    # Solo agregar si el resultado no está vacío
+                    if isinstance(phone_result, dict) and phone_result:
                         results.append(phone_result)
 
                 # Filtrar duplicados basados en nombre, email, teléfono
@@ -221,13 +197,10 @@ class PeopleSearcher:
                         seen_keys.add(key)
                         unique_results.append(result)
 
-                # Si hay un nombre de usuario o identificador, buscar perfiles sociales
-                # utilizando herramientas como Maigret y Sherlock.  Este paso es
-                # adicional y no afecta a los resultados de directorios públicos.
-                username = criteria.get('username') or criteria.get('name')
-                if username:
-                    social_profiles = self.search_social_profiles(username)
-                    unique_results.append({"social_profiles": social_profiles})
+                # Ya se incluye la búsqueda de perfiles sociales en
+                # `search_people_by_name`, por lo que no es necesario ejecutar
+                # nuevamente la búsqueda aquí.  Si se requiere una búsqueda
+                # adicional, podría integrarse en el futuro.
 
                 return unique_results
 
@@ -262,3 +235,30 @@ def advanced_search(criteria: Dict[str, Any], search_type: str = "people",
                     api_keys: Dict[str, str] = None) -> List[Dict]:
     """Búsqueda avanzada completa"""
     return people_searcher.advanced_search(criteria, search_type, api_keys)
+
+
+# --- NUEVA FUNCIÓN ---
+def search_social_profiles(identifier: str) -> Dict[str, Any]:
+    """
+    Búsqueda directa de perfiles sociales utilizando herramientas OSINT.
+
+    Esta función actúa como un envoltorio de la función de instancia
+    ``PeopleSearcher.search_social_profiles`` para exponerla a otros módulos
+    (por ejemplo ``socmint``) que esperan una función pública. Si no se
+    proporciona un identificador válido, se devuelve un diccionario vacío.
+
+    Args:
+        identifier: Nombre de usuario o identificador a buscar.
+
+    Returns:
+        Un diccionario con los resultados de Maigret y Sherlock o con
+        mensajes de error si las herramientas no están instaladas o no
+        devuelven datos.
+    """
+    try:
+        if not identifier:
+            return {}
+        return people_searcher.search_social_profiles(identifier)
+    except Exception as exc:
+        logger.error(f"Error en search_social_profiles: {exc}")
+        return {"error": str(exc)}

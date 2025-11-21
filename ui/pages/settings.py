@@ -92,6 +92,24 @@ def show_settings_page():
     else:
         st.info("No tienes claves API configuradas aún.")
 
+    st.markdown("### 🔍 Verificar claves activas")
+
+    if current_configs:
+        st.write("Claves activas:")
+        for item in current_configs:
+            config_key = item['config_key']
+            updated_at = item.get('updated_at', 'N/A')
+            if config_key == "hibp":
+                st.markdown(f"- **{config_key}**: 🔒 *Clave encriptada (no visible)* — Actualizada: {updated_at}")
+            elif config_key == "openai_api_key":
+                st.markdown(f"- **{config_key}**: 🔑 *API GPT - Configurada* — Actualizada: {updated_at}")
+            elif config_key == "google_api_key":
+                st.markdown(f"- **{config_key}**: 🌐 *Búsqueda avanzada - Configurada* — Actualizada: {updated_at}")
+            else:
+                st.markdown(f"- **{config_key}**: ✅ Configurada — Actualizada: {updated_at}")
+        else:
+            st.info("No tienes claves API configuradas aún.")
+
     # --- Agregar o modificar clave ---
     st.markdown("### ➕ Configurar Nueva API Key")
 
@@ -134,6 +152,9 @@ def show_settings_page():
                 success = config_manager.save_config(user_id, selected_api, api_value)
                 if success:
                     st.success(f"✅ Clave API '{selected_api}' guardada correctamente.")
+                    if selected_api == "hibp":
+                        st.info(
+                            "💡 Tu clave de HIBP ahora está activa. Puedes usarla para buscar correos comprometidos en la búsqueda personal.")
                     st.rerun()  # Recarga para reflejar cambio
                 else:
                     st.error("❌ Error al guardar la clave.")

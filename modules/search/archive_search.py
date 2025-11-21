@@ -142,6 +142,7 @@ class ArchiveSearcher:
             current_year = 2024
             for i in range(min(years, 10)):
                 year = current_year - i
+                # Incluimos campos adicionales para que la interfaz tenga algo que mostrar
                 results.append({
                     "year": year,
                     "domain": domain,
@@ -151,7 +152,11 @@ class ArchiveSearcher:
                     "name_servers": [f"ns{i + 1}.{domain}", f"ns{i + 2}.{domain}"],
                     "status": "ACTIVE",
                     "registrar": "Registrar Name",
-                    "timestamp": time.time() - (i * 31536000)  # Un año en segundos
+                    "timestamp": time.time() - (i * 31536000),  # Un año en segundos
+                    # Campo que la UI utiliza para mostrar en la lista
+                    "timestamp_human": f"{year}-01-01",
+                    # También proporcionar una URL genérica relacionada con el dominio
+                    "url": f"https://{domain}"
                 })
 
             logger.info(f"Retornado {len(results)} años de historia de dominio para {domain}")

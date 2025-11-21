@@ -51,7 +51,8 @@ class ConfigManager:
         :param config_key: Clave a buscar
         :return: El valor (string) o None si no existe.
         """
-        return get_user_config(user_id, config_key)
+        value = get_user_config(user_id, config_key)
+        return value or ""
 
     def delete_config(self, user_id: int, config_key: str) -> bool:
         """

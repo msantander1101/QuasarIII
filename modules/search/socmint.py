@@ -33,55 +33,122 @@ class SocmintSearcher:
 
     def search_social_profiles(self, username: str, platforms: List[str] = None) -> Dict[str, Any]:
         """
-        Búsqueda real de perfíles en múltiples plataformas con APIs reales
+        Búsqueda de perfiles en redes sociales utilizando herramientas OSINT como Maigret y Sherlock.
+
+        Este método delega la búsqueda en ``people_search.search_social_profiles`` para
+        aprovechar las integraciones de Maigret y Sherlock ya implementadas.  A partir
+        del resultado de estas herramientas se construye una lista de perfiles
+        encontrados en distintas plataformas.  Si una herramienta devuelve un
+        mensaje de error o advertencia, se recopila en la lista de ``errors``.
+        Si ninguna cuenta se encuentra, la lista ``profiles_found`` estará vacía.
+
+        Args:
+            username: Nombre de usuario o identificador a buscar.
+            platforms: Lista opcional de plataformas donde filtrar los resultados.  Si se
+                proporciona, solo se incluirán los resultados que coincidan con las
+                plataformas indicadas.  Caso contrario, se incluirán todas.
+
+        Returns:
+            Un diccionario con los perfiles encontrados y metadatos asociados.
         """
-        start_time = time.time()
-        logger.info(f"Búsqueda SOCMINT real: {username} en plataformas: {platforms}")
-
+        # Importar de forma perezosa para evitar dependencias circulares
         try:
-            # Si no se especifican plataformas, usar todas disponibles
-            if not platforms:
-                platforms = ['instagram', 'tiktok', 'youtube', 'twitter', 'linkedin', 'facebook', 'reddit']
-
-            results = {
+            from . import people_search
+        except Exception as e:
+            logger.error(f"Error importando people_search en SOCMINT: {e}")
+            return {
                 "query": username,
-                "platforms_searched": platforms,
+                "platforms_searched": platforms or [],
                 "timestamp": time.time(),
                 "profiles_found": [],
                 "total_profiles": 0,
-                "errors": []
+                "errors": [f"Error import people_search: {e}"]
             }
 
-            # Búsqueda concurrente en múltiples plataformas
-            with ThreadPoolExecutor(max_workers=5) as executor:
-                futures = []
-
-                for platform in platforms:
-                    future = executor.submit(self._fetch_social_profile, username, platform)
-                    futures.append((platform, future))
-
-                # Recopilar resultados
-                for platform, future in futures:
-                    try:
-                        profile_results = future.result(timeout=30)
-                        if profile_results:
-                            results["profiles_found"].extend(profile_results)
-                        results["total_profiles"] += len(profile_results) if profile_results else 0
-                    except Exception as e:
-                        error_msg = f"Error en {platform}: {str(e)}"
-                        logger.error(error_msg)
-                        results["errors"].append(error_msg)
-
-            logger.info(f"Búsqueda SOCMINT real completada en {time.time() - start_time:.2f}s")
-            return results
-
+        # Ejecutar búsqueda de perfiles usando Maigret y Sherlock
+        try:
+            # ``people_search`` expone la función search_social_profiles a nivel de módulo
+            tool_results = people_search.search_social_profiles(username)
         except Exception as e:
-            logger.error(f"Error en búsqueda SOCMINT real: {e}")
+            logger.error(f"Error ejecutando búsqueda con Maigret/Sherlock: {e}")
             return {
-                "error": f"Error de búsqueda: {str(e)}",
                 "query": username,
-                "timestamp": time.time()
+                "platforms_searched": platforms or [],
+                "timestamp": time.time(),
+                "profiles_found": [],
+                "total_profiles": 0,
+                "errors": [f"Error ejecutando herramientas OSINT: {e}"]
             }
+
+        profiles_found: List[Dict[str, Any]] = []
+        errors: List[str] = []
+
+        # Procesar los resultados de cada herramienta (maigret, sherlock)
+        if isinstance(tool_results, dict):
+            for tool_name, data in tool_results.items():
+                if not data:
+                    continue
+                # Si devuelve un error o advertencia, recopilar
+                if isinstance(data, dict) and (data.get('error') or data.get('warning')):
+                    msg = data.get('error') or data.get('warning')
+                    errors.append(f"{tool_name}: {msg}")
+                    continue
+                # Si hay salida cruda, almacenar como un único perfil con raw_output
+                if isinstance(data, dict) and data.get('raw_output'):
+                    profiles_found.append({
+                        'platform': tool_name,
+                        'username': username,
+                        'followers': 'N/A',
+                        'posts': 'N/A',
+                        'verified': False,
+                        'url': None,
+                        'source': tool_name,
+                        'raw_output': data.get('raw_output')
+                    })
+                    continue
+                # De lo contrario se asume que data es un diccionario de sitios
+                if isinstance(data, dict):
+                    for site, details in data.items():
+                        try:
+                            if isinstance(details, dict):
+                                # Determinar si el perfil existe (status/state/exists)
+                                status = details.get('status') or details.get('state') or details.get('exists')
+                                exists = False
+                                if isinstance(status, str):
+                                    exists = status.lower() in ['claimed', 'found', 'exists', 'true', 'yes']
+                                elif isinstance(status, bool):
+                                    exists = status
+                                else:
+                                    # Si no hay estado, asumimos que la entrada es válida
+                                    exists = True
+                                if not exists:
+                                    continue
+                                profile = {
+                                    'platform': site,
+                                    'username': username,
+                                    'followers': details.get('followers', 'N/A'),
+                                    'posts': details.get('posts', details.get('videos', 'N/A')),
+                                    'verified': details.get('verified', False),
+                                    'url': details.get('url') or details.get('url_main'),
+                                    'source': tool_name
+                                }
+                                # Si el usuario especificó plataformas concretas, filtrar
+                                if platforms and site.lower() not in [p.lower() for p in platforms]:
+                                    continue
+                                profiles_found.append(profile)
+                        except Exception as ex:
+                            errors.append(f"{tool_name}-{site}: parsing error {ex}")
+                else:
+                    errors.append(f"{tool_name}: formato de datos no soportado")
+
+        return {
+            "query": username,
+            "platforms_searched": platforms or list(tool_results.keys()) if isinstance(tool_results, dict) else [],
+            "timestamp": time.time(),
+            "profiles_found": profiles_found,
+            "total_profiles": len(profiles_found),
+            "errors": errors
+        }
 
     def _fetch_social_profile(self, username: str, platform: str) -> List[Dict]:
         """
@@ -471,3 +538,35 @@ def get_social_network_graph(usernames: List[str]) -> Dict[str, Any]:
 def get_supported_platforms() -> List[str]:
     """Obtener plataformas compatibles"""
     return socmint_searcher.get_supported_platforms()
+
+
+# Función adicional para buscar múltiples usuarios en plataformas sociales
+def search_multiple_social_profiles(usernames: List[str], platforms: List[str] = None, api_configs: Dict[str, Any] = None) -> Dict[str, Any]:
+    """
+    Realiza una búsqueda de perfiles sociales para múltiples nombres de usuario
+    utilizando el buscador SOCMINT. Combina los resultados en una lista.
+
+    Args:
+        usernames: Lista de usernames o identificadores a buscar.
+        platforms: Lista de plataformas específicas (opcional). Si se omite, se
+                   utilizarán todas las plataformas soportadas.
+        api_configs: Configuraciones específicas de API (no se usan en la versión simulada).
+
+    Returns:
+        Diccionario con los perfiles encontrados y metadatos.
+    """
+    aggregated_results: List[Dict[str, Any]] = []
+    total_profiles = 0
+    for uname in usernames:
+        # Ejecutar búsqueda de perfiles para cada usuario
+        profile_data = socmint_searcher.search_social_profiles(uname, platforms)
+        aggregated_results.append(profile_data)
+        total_profiles += profile_data.get('total_profiles', 0)
+
+    return {
+        "query": usernames,
+        "platforms_searched": platforms or socmint_searcher.get_supported_platforms(),
+        "results": aggregated_results,
+        "total_profiles": total_profiles,
+        "timestamp": time.time()
+    }

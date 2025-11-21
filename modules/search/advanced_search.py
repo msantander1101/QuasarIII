@@ -136,48 +136,99 @@ class AdvancedSearcher:
             return {"error": f"Búsqueda personas: {str(e)}"}
 
     def _search_email(self, query: str) -> Dict[str, Any]:
-        """Búsqueda de información de email real"""
+        """
+        Búsqueda de información de email y adaptación a la estructura que espera la interfaz.
+
+        Este método llama al módulo ``emailint`` para obtener información sobre
+        brechas de seguridad y otros datos de un correo electrónico. Luego
+        transforma el resultado en una lista de entradas resumidas para que
+        puedan mostrarse correctamente en la UI. Si no hay información o el
+        correo tiene formato incorrecto, se devuelve una lista con un único
+        elemento que incluye el mensaje de error o la advertencia.
+        """
         try:
+            # Obtener la clave de HIBP configurada (si la hay)
             try:
                 user_id = st.session_state.get('current_user_id')
                 hibp_key = config_manager.get_config(user_id, "hibp")
                 if not hibp_key:
                     hibp_key = None
-            except:
+            except Exception:
                 hibp_key = None
-            email_results = emailint.search_email_info(query, hibp_key)
+
+            # Realizar la búsqueda de email. ``email_data`` es un dict con
+            # información sobre brechas (breeches_info), pastes, y verificación.
+            email_data = emailint.search_email_info(query, hibp_key)
+
+            results_list: List[Dict[str, Any]] = []
+
+            # Manejar errores globales (como formato inválido)
+            if isinstance(email_data, dict) and email_data.get("error"):
+                results_list.append({
+                    "email": query,
+                    "breached": False,
+                    "breach_count": 0,
+                    "sources": "N/A",
+                    "error": email_data.get("error")
+                })
+            else:
+                # Extraer información de brechas.  Nota: en ``emailint`` la
+                # clave se denomina ``breeches_info`` (con doble 'e').  Pero
+                # añadimos también ``breaches_info`` por compatibilidad.
+                breach_info = {}
+                if isinstance(email_data, dict):
+                    breach_info = email_data.get('breeches_info') or email_data.get('breaches_info') or {}
+
+                breached = False
+                breach_count = 0
+                sources = []
+
+                if isinstance(breach_info, dict):
+                    if breach_info.get('error'):
+                        sources.append(f"Error: {breach_info.get('error')}")
+                    else:
+                        breached = breach_info.get('breached', False)
+                        breach_count = breach_info.get('breach_count', 0)
+                        src = breach_info.get('source')
+                        if src:
+                            sources.append(src)
+
+                results_list.append({
+                    "email": query,
+                    "breached": breached,
+                    "breach_count": breach_count,
+                    "sources": sources if sources else "API",
+                })
+
             return {
                 "source": "email",
                 "query": query,
-                "results": email_results,
+                "results": results_list,
                 "metadata": {
                     "search_time": time.time()
                 }
             }
+
         except Exception as e:
             return {"error": f"Búsqueda email: {str(e)}"}
 
     def _search_social(self, query: str) -> Dict[str, Any]:
         """Búsqueda de redes sociales real"""
         try:
-            # Simulación de conexión real
-            # En producción conectará con Twitter, LinkedIn, etc.
+            # Conectar con el módulo SOCMINT para obtener perfiles sociales reales o simulados
+            from . import socmint
+            # Utilizar el nombre de usuario tal cual o derivar uno del query
+            username = query.strip()
+            # Ejecutar la búsqueda de perfiles sociales
+            social_data = socmint.search_social_profiles(username)
+            profiles = social_data.get('profiles_found', [])
+            total_profiles = social_data.get('total_profiles', len(profiles))
             return {
                 "source": "social",
                 "query": query,
-                "results": [{
-                    "username": query,
-                    "platform": "MultiPlataforma",
-                    "profile_url": "https://example.com/profile",
-                    "followers": 1200,
-                    "following": 800,
-                    "posts": 345,
-                    "verified": False,
-                    "source": "Búsqueda Social",
-                    "confidence": 0.75
-                }],
+                "results": profiles,
                 "metadata": {
-                    "total_results": 1,
+                    "total_results": total_profiles,
                     "search_time": time.time()
                 }
             }
@@ -185,22 +236,62 @@ class AdvancedSearcher:
             return {"error": f"Búsqueda social: {str(e)}"}
 
     def _search_web(self, query: str) -> Dict[str, Any]:
-        """Búsqueda web real (simulada como ejemplo)"""
+        """
+        Búsqueda web utilizando la API pública de DuckDuckGo.
+
+        Este método consulta DuckDuckGo para obtener resultados relacionados con la
+        búsqueda.  Si la llamada falla o no hay resultados, devuelve un único
+        resultado simulando un enlace genérico.  Se limita el número de
+        resultados a tres para mantener la interfaz limpia.
+        """
         try:
-            # Simulación de resultados reales de búsqueda web
+            results: List[Dict[str, Any]] = []
+            import urllib.parse
+            # Construir URL de consulta. La API de DuckDuckGo no requiere clave.
+            api_url = (
+                f"https://api.duckduckgo.com/?q={urllib.parse.quote_plus(query)}"
+                "&format=json&no_redirect=1&skip_disambig=1"
+            )
+            response = self.session.get(api_url, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                # DuckDuckGo devuelve RelatedTopics con enlaces y textos
+                def extract_topics(topics):
+                    for item in topics:
+                        # Si hay subtemas, procesarlos recursivamente
+                        if isinstance(item, dict) and 'Topics' in item:
+                            extract_topics(item['Topics'])
+                        else:
+                            if isinstance(item, dict) and 'FirstURL' in item and 'Text' in item:
+                                results.append({
+                                    "title": item.get('Text', 'Sin título'),
+                                    "url": item.get('FirstURL', '#'),
+                                    "snippet": item.get('Text', ''),
+                                    "source": "DuckDuckGo",
+                                    "confidence": 0.8,
+                                    "timestamp": time.time()
+                                })
+                if 'RelatedTopics' in data:
+                    extract_topics(data['RelatedTopics'])
+            # Limitar a 3 primeros resultados
+            if results:
+                results = results[:3]
+            else:
+                # Resultado predeterminado si no hay nada
+                results = [{
+                    "title": f"Búsqueda para '{query}'",
+                    "url": f"https://duckduckgo.com/?q={urllib.parse.quote_plus(query)}",
+                    "snippet": "No se encontraron resultados detallados.",
+                    "source": "DuckDuckGo",
+                    "confidence": 0.5,
+                    "timestamp": time.time()
+                }]
             return {
                 "source": "web",
                 "query": query,
-                "results": [{
-                    "title": f"Resultados para '{query}'",
-                    "url": "https://example.com/results",
-                    "snippet": "Contenido relevante de búsqueda web",
-                    "source": "Motor de Búsqueda",
-                    "confidence": 0.80,
-                    "timestamp": time.time()
-                }],
+                "results": results,
                 "metadata": {
-                    "total_results": 1,
+                    "total_results": len(results),
                     "search_time": time.time()
                 }
             }

@@ -152,7 +152,7 @@ class DarkWebSearcher:
         return self.proxy_working
 
     def search_dark_web_catalog(self, query: str, search_type: str = "general",
-                                max_results: int = 15) -> Dict[str, Any]:
+                                max_results: int = 50) -> Dict[str, Any]:
         """
         Búsqueda completa en catálogo del dark web real con múltiples buscadores
         """
@@ -175,16 +175,24 @@ class DarkWebSearcher:
                 "search_engines_checked": 0,
                 "is_anonymous": self.proxy_working
             }
-
-            # Búsqueda en motores de búsqueda reales
-            successful_searches = 0
-            results_per_engine = max_results // len(self.onion_search_engines) if self.onion_search_engines else 1
-
-            # Probar cada buscador disponible
+            relevant_engines = []
             for engine in self.onion_search_engines:
                 if not engine['supported']:
                     continue
-
+                if search_type == "paste":
+                    if engine.get("type") == "paste":
+                        relevant_engines.append(engine)
+                elif search_type == "marketplace":
+                    if "market" in engine['name'].lower() or engine.get("type") == "general":
+                        relevant_engines.append(engine)
+                elif search_type == "document":
+                    if engine.get("type") == "general":
+                        relevant_engines.append(engine)
+            # Búsqueda en motores de búsqueda reales
+            successful_searches = 0
+            results_per_engine = max_results // len(relevant_engines) if relevant_engines else 1
+            # Probar cada buscador disponible
+            for engine in relevant_engines:
                 try:
                     search_results = self._search_single_engine(engine, query, results_per_engine)
                     if search_results:
@@ -196,29 +204,28 @@ class DarkWebSearcher:
                     logger.warning(f"Error en buscador {engine['name']}: {e}")
                     continue
 
-            # Calcular totales
-            results["total_results"] = sum(len(v) for v in results["raw_results"].values())
+                results["total_results"] = sum(len(v) for v in results["raw_results"].values())
 
-            # Mostrar IP actual si está disponible
-            try:
-                ip_info = get_tor_ip()
-                if ip_info.get("ip"):
-                    results["current_ip"] = ip_info["ip"]
-            except Exception as e:
-                logger.warning(f"No se pudo obtener IP: {e}")
+                # Mostrar IP actual si está disponible
+                try:
+                    ip_info = get_tor_ip()
+                    if ip_info.get("ip"):
+                        results["current_ip"] = ip_info["ip"]
+                except Exception as e:
+                    logger.warning(f"No se pudo obtener IP: {e}")
 
-            logger.info(f"Búsqueda catálogo oscuro completada en {time.time() - start_time:.2f}s, "
-                        f"{successful_searches} buscadores exitosos")
+                logger.info(f"Búsqueda catálogo oscuro completada en {time.time() - start_time:.2f}s, "
+                            f"{successful_searches} buscadores exitosos")
 
-            return results
+                return results
 
         except Exception as e:
             logger.error(f"Error en búsqueda catálogo oscuro: {e}")
             return {
-                "error": f"Error de búsqueda: {str(e)}",
-                "query": query,
-                "timestamp": time.time(),
-                "is_anonymous": self.proxy_working
+            "error": f"Error de búsqueda: {str(e)}",
+            "query": query,
+            "timestamp": time.time(),
+            "is_anonymous": self.proxy_working
             }
 
     def _is_development_mode(self) -> bool:
@@ -459,7 +466,7 @@ darkweb_searcher = DarkWebSearcher()
 
 
 # Funciones públicas para exportar
-def search_dark_web_catalog(query: str, search_type: str = "general", max_results: int = 15) -> Dict[str, Any]:
+def search_dark_web_catalog(query: str, search_type: str = "general", max_results: int = 50) -> Dict[str, Any]:
     """Función pública para búsqueda en catálogo oscuro"""
     return darkweb_searcher.search_dark_web_catalog(query, search_type, max_results)
 

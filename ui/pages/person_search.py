@@ -17,10 +17,6 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
-# ui/pages/person_search.py
-
-# ... [resto del código existente] ...
-
 def show_person_search_ui():
     """
     Interfaz moderna y robusta con búsqueda avanzada multifuncional.
@@ -624,7 +620,7 @@ def show_person_search_ui():
                                         <div style="border-left: 4px solid #e74c3c; padding: 10px; margin: 10px 0; 
                                                    background: #1e1e2e; border-radius: 0 8px 8px 0;">
                                             <h4 style="color: #e74c3c; margin: 0;">{result.get('title', 'Título sin especificar')}</h4>
-                                                                                    <p style="color: #b0b0c0; margin: 5px 0;"><strong>Fuente:</strong> {result.get('source', 'Desconocida')}</p>
+                                            <p style="color: #b0b0c0; margin: 5px 0;"><strong>Fuente:</strong> {result.get('source', 'Desconocida')}</p>
                                             <p style="margin: 0;">{result.get('description', 'Sin descripción')}</p>
                                             {" ".join(other_fields)}
                                             <a href="{result.get('url', '#')}" target="_blank" style="color: #3498db;">Ver detalles</a>
@@ -710,95 +706,119 @@ def show_person_search_ui():
                 except Exception as e:
                     st.error(f"Error al detectar relaciones: {e}")
 
-    # --- Nueva sección de búsqueda de documentos locales ---
-    # Sección para búsqueda en documentos locales
-    if st.session_state.get('search_results') is not None:
-        st.markdown("---")
-        st.subheader("📁 Búsqueda de Documentos Locales")
+    # --- Nueva sección de búsqueda en fuentes públicas ---
+    # Sección para búsqueda en fuentes públicas que contengan los datos introducidos
+    st.markdown("---")
+    st.subheader("🌐 Búsqueda en Fuentes Públicas")
 
-        # Campo para especificar directorio de búsqueda
-        search_directory = st.text_input(
-            "📂 Directorio de Búsqueda",
-            key="search_directory",
-            placeholder="/ruta/a/documentos/",
-            help="Ruta al directorio donde buscar documentos"
-        )
+    # Crear lista de términos de búsqueda basados en los campos del formulario
+    search_terms = []
 
-        # Campo para especificar extensiones
-        search_extensions = st.text_input(
-            "📄 Extensiones (separadas por coma)",
-            key="search_extensions",
-            placeholder=".pdf,.docx,.doc",
-            value=".pdf,.docx,.doc",
-            help="Extensiones de archivo a buscar (ej: .pdf,.docx)"
-        )
+    # Añadir términos de búsqueda de los campos de texto
+    if search_name:
+        search_terms.extend([term.strip() for term in search_name.split() if term.strip()])
+    if search_email:
+        # Añadir parte del email sin dominio
+        email_parts = search_email.split('@')[0].split('.')
+        search_terms.extend(email_parts)
+    if search_location:
+        search_terms.extend([term.strip() for term in search_location.split() if term.strip()])
+    if search_company:
+        search_terms.extend([term.strip() for term in search_company.split() if term.strip()])
+    if search_role:
+        search_terms.extend([term.strip() for term in search_role.split() if term.strip()])
+    if search_domain:
+        # Usar solo el nombre del dominio
+        domain_name = search_domain.split('.')[0] if '.' in search_domain else search_domain
+        search_terms.append(domain_name)
+    if search_phone:
+        # Extraer números del teléfono
+        phone_numbers = ''.join(filter(str.isdigit, search_phone))
+        if len(phone_numbers) >= 6:  # Solo números largos
+            search_terms.append(phone_numbers)
 
-        # Botón para buscar documentos locales
-        if st.button("🔍 Buscar Documentos Locales", use_container_width=True):
-            if not search_directory:
-                st.warning("⚠️ Por favor, introduce una ruta de directorio.")
-                return
+    # Eliminar duplicados
+    search_terms = list(set(term for term in search_terms if len(term) > 2))
 
+    if search_terms:
+        st.info(f"🔍 Buscando en fuentes públicas con términos: {', '.join(search_terms)}")
+
+        # Botón para iniciar búsqueda en fuentes públicas
+        if st.button("🔍 Buscar en Fuentes Públicas", use_container_width=True):
             try:
-                # Importar aquí para evitar problemas de dependencias
-                from modules.search.documentint import find_all_documents_in_directory, search_in_multiple_documents
+                # Importar módulos de búsqueda de fuentes públicas dentro del bloque
+                from modules.search.pastesearch import search_paste_sites
+                from modules.search.emailint import check_email_breach
 
-                # Parsear las extensiones
-                extensions = [ext.strip() for ext in search_extensions.split(",") if ext.strip()]
+                st.info("🔍 Realizando búsquedas en fuentes públicas...")
 
-                # Buscar documentos en el directorio
-                st.info(f"🔍 Buscando documentos en: {search_directory}")
-                with st.spinner("📁 Escaneando directorio..."):
-                    documents = find_all_documents_in_directory(search_directory, extensions)
+                # Búsqueda en pastes y leaks
+                paste_results = []
+                for term in search_terms:
+                    try:
+                        results = search_paste_sites(term)
+                        paste_results.extend(results)
+                    except Exception as e:
+                        logger.warning(f"Error buscando paste para '{term}': {e}")
 
-                if documents:
-                    st.success(f"✅ Encontrados {len(documents)} documentos")
-
-                    # Campo para términos de búsqueda en documentos
-                    search_terms = st.text_input(
-                        "🔍 Términos de búsqueda en documentos",
-                        key="document_search_terms",
-                        placeholder="palabra clave 1, palabra clave 2...",
-                        help="Términos separados por coma"
-                    )
-
-                    if search_terms:
-                        # Convertir términos a lista
-                        terms_list = [term.strip() for term in search_terms.split(",") if term.strip()]
-
-                        if terms_list:
-                            st.info(f"🔎 Buscando términos en documentos: {', '.join(terms_list)}")
-
-                            # Buscar en documentos
-                            with st.spinner("🔍 Buscando términos en documentos..."):
-                                doc_results = search_in_multiple_documents(
-                                    [doc['path'] for doc in documents],
-                                    terms_list
-                                )
-
-                            # Mostrar resultados
-                            for doc_filename, result in doc_results.items():
-                                if result["results"]:
-                                    st.markdown(f"### 📄 {doc_filename}")
-                                    st.markdown(f"**Ruta:** {result['path']}")
-                                    st.markdown(f"**Resultados:** {result['found_terms']} términos encontrados")
-                                    for res in result["results"]:
-                                        if "term" in res:
-                                            st.markdown(f"- **Término:** {res['term']}")
-                                            st.markdown(f"  - Coincidencias: {res.get('total_matches', 0)}");
-                                            if 'previews' in res:
-                                                for i, preview in enumerate(res['previews']):
-                                                    st.markdown(f"    - Vista previa {i+1}: {preview['preview']}")
-                                else:
-                                    st.markdown(f"### 📄 {doc_filename}")
-                                    st.markdown("**No se encontraron términos coincidentes**")
-
+                # Mostrar resultados de pastes
+                if paste_results:
+                    st.markdown("### 📄 Resultados de Pastes y Leaks")
+                    for i, result in enumerate(paste_results):
+                        with st.expander(f"📄 {result['title']} ({result['source']})", expanded=False):
+                            st.markdown(f"""
+                            <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                       padding: 15px; color: #e6e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                                <h5 style="margin: 0; color: #ffffff;">{result['title']}</h5>
+                                <p style="color: #b0b0c0; font-size: 14px;">
+                                    <strong>Fecha:</strong> {result.get('date', 'Desconocida')}<br/>
+                                    <strong>Tamaño:</strong> {result.get('size', 'N/A')}<br/>
+                                    <strong>Idioma:</strong> {result.get('language', 'N/A')}<br/>
+                                    <strong>Fuente:</strong> {result.get('source', 'N/A')}
+                                </p>
+                                <a href="{result.get('url', '#')}" target="_blank" style="color: #28a745; text-decoration: underline; font-size: 13px;">
+                                    🌐 Ver enlace
+                                </a>
+                            </div>
+                            """, unsafe_allow_html=True)
                 else:
-                    st.warning("⚠️ No se encontraron documentos en el directorio especificado.")
+                    st.info("🔍 No se encontraron resultados en fuentes de paste y leaks.")
+
+                # Búsqueda de brechas de email (solo si hay emails)
+                email_breaches = []
+                for term in search_terms:
+                    if '@' in term and '.' in term:  # Es probablemente un email
+                        try:
+                            breach_result = check_email_breach(term, st.session_state.get('current_user_id', 1))
+                            if isinstance(breach_result, dict) and breach_result.get('breached'):
+                                email_breaches.append(breach_result)
+                        except Exception as e:
+                            logger.debug(f"Error verificando brecha de email: {e}")
+
+                if email_breaches:
+                    st.markdown("### 📧 Brechas de Email Encontradas")
+                    for breach in email_breaches:
+                        st.markdown(f"""
+                        <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                   padding: 15px; color: #e6e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                            <h5 style="margin: 0; color: #ffffff;">Email comprometido</h5>
+                            <p style="color: #b0b0c0; font-size: 14px;">
+                                <strong>Email:</strong> {breach.get('email', 'N/A')}<br/>
+                                <strong>Breaches:</strong> {breach.get('breach_count', 0)}<br/>
+                                <strong>Fuente:</strong> {breach.get('source', 'N/A')}
+                            </p>
+                            {f'<p style="color: #b0b0c0; font-size: 14px;"><strong>Mensaje:</strong> {breach.get("message", "N/A")}</p>' if breach.get("message") else ""}
+                        </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.info("🔍 No se encontraron brechas de email relevantes.")
 
             except Exception as e:
-                st.error(f"❌ Error buscando documentos: {str(e)}")
-                logger.error(f"Error al buscar documentos: {e}")
+                st.error(f"❌ Error en búsqueda en fuentes públicas: {str(e)}")
+                logger.error(f"Error al buscar en fuentes públicas: {e}")
+    else:
+        st.info(
+            "📝 Introduce información en los campos de búsqueda para activar la opción de búsqueda en fuentes públicas.")
 
     # Estado de Tor y dark web
     if 'search_results' in st.session_state and st.session_state['search_results']:

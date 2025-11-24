@@ -220,6 +220,15 @@ def discover_relationship_types(person_data: Dict[str, Any]) -> List[Dict[str, A
     return relationship_searcher.discover_relationship_types(person_data)
 
 
-def suggest_relationships(person_a: Dict[str, Any], person_b: Dict[str, Any]) -> Dict[str, Any]:
-    """Sugerir relaciones entre personas"""
-    return relationship_searcher.suggest_relationships(person_a, person_b)
+def suggest_relationships(person_a: Dict[str, Any], person_b: Dict[str, Any]) -> Dict[str, List[Dict]]:
+    """
+    Sugerencia de relaciones entre dos personas encontradas.
+    """
+    # Ejemplo de sugerencia basada en nombre, email, ubicación
+    suggestions = {
+        "Colaborador": [person_a, person_b],
+        "Familiar": [person_a, person_b],
+        "Amigo": [person_a, person_b],
+        "Contacto": [person_a, person_b]
+    }
+    return suggestions

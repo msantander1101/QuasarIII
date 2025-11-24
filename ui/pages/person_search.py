@@ -564,10 +564,18 @@ def show_person_search_ui():
             if st.button("🔗 Detectar Tipos", key="detect_types_btn"):
                 try:
                     st.info("🔎 Detectando tipos de relación...")
-                    suggested = suggest_relationships(st.session_state['search_results'])
-                    if suggested:
-                        for rel_type, persons in suggested.items():
-                            st.info(f"💡 Sugerencia: {rel_type} entre {', '.join(p['name'] for p in persons)}")
+                    # ✅ Solo si tienes al menos 2 personas
+                    if st.session_state.get('search_results') and len(
+                            st.session_state['search_results']['people']['results']) >= 2:
+                        # Extraer las primeras 2 personas
+                        people_list = st.session_state['search_results']['people']['results']
+                        person_a = people_list[0]
+                        person_b = people_list[1]
+
+                        suggested = suggest_relationships(person_a, person_b)
+                        if suggested:
+                            for rel_type, persons in suggested.items():
+                                st.info(f"💡 Sugerencia: {rel_type} entre {', '.join(p['name'] for p in persons)}")
                     else:
                         st.info("No se detectaron relaciones específicas.")
                 except Exception as e:

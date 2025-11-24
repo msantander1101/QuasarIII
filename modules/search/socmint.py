@@ -51,24 +51,14 @@ class SocmintSearcher:
         Returns:
             Un diccionario con los perfiles encontrados y metadatos asociados.
         """
-        # Importar de forma perezosa para evitar dependencias circulares
+        # Utilizar PeopleSearcher directamente para evitar ambigüedades.
+        # La clase ``PeopleSearcher`` encapsula la ejecución de Maigret y
+        # Sherlock y proporciona un método `search_social_profiles` que
+        # devuelve un diccionario con los resultados de cada herramienta.
         try:
-            from . import people_search
-        except Exception as e:
-            logger.error(f"Error importando people_search en SOCMINT: {e}")
-            return {
-                "query": username,
-                "platforms_searched": platforms or [],
-                "timestamp": time.time(),
-                "profiles_found": [],
-                "total_profiles": 0,
-                "errors": [f"Error import people_search: {e}"]
-            }
-
-        # Ejecutar búsqueda de perfiles usando Maigret y Sherlock
-        try:
-            # ``people_search`` expone la función search_social_profiles a nivel de módulo
-            tool_results = people_search.search_social_profiles(username)
+            from .people_search import PeopleSearcher
+            searcher = PeopleSearcher()
+            tool_results = searcher.search_social_profiles(username)
         except Exception as e:
             logger.error(f"Error ejecutando búsqueda con Maigret/Sherlock: {e}")
             return {

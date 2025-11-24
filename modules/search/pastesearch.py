@@ -1,4 +1,5 @@
 # modules/search/pastesearch.py
+
 """
 Búsqueda real de información de paste y leaks usando APIs reales
 - Usa Have I Been Pwned (breaches)
@@ -8,6 +9,7 @@ Búsqueda real de información de paste y leaks usando APIs reales
 import logging
 import requests
 import time
+import re
 from typing import List, Dict, Any
 from urllib.parse import quote_plus, urlencode
 from core.config_manager import config_manager
@@ -28,6 +30,7 @@ MAX_RETRIES = 3
 def search_paste_sites(query: str, pastebin_api_key: str = None) -> List[Dict[str, Any]]:
     """
     Búsqueda real en fuentes de paste (usando HIBP, GitHub Gist, Leakatlas.com, y Google Site Search)
+    Solo busca en HIBP si se proporciona un correo electrónico válido.
     """
     logger.info(f"Buscando paste por: {query}")
 
@@ -41,8 +44,11 @@ def search_paste_sites(query: str, pastebin_api_key: str = None) -> List[Dict[st
 
         hibp_key = config_manager.get_config(user_id, "hibp")  # ✅ Clave del usuario
 
-        # 1. Buscar en HIBP (breaches de contraseñas, correos)
-        if hibp_key:
+        # Verificar si la consulta es un correo electrónico válido
+        is_email = bool(re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', query.strip()))
+
+        # 1. Buscar en HIBP (breaches de contraseñas, correos) - SOLO SI ES UN EMAIL
+        if hibp_key and is_email:
             query_hash = quote_plus(query.lower().strip())
             url = f"{HIBP_BASE_URL}/{query_hash}"
             headers = {
@@ -50,7 +56,7 @@ def search_paste_sites(query: str, pastebin_api_key: str = None) -> List[Dict[st
                 "User-Agent": "QuasarIII/1.0"
             }
 
-            for _ in range(MAX_RETRIES):
+            for attempt in range(MAX_RETRIES):
                 try:
                     response = requests.get(url, headers=headers, timeout=10)
                     if response.status_code == 200:
@@ -68,16 +74,27 @@ def search_paste_sites(query: str, pastebin_api_key: str = None) -> List[Dict[st
                                     "tags": ["credentials", "passwords", "email"]
                                 })
                         break
+                    elif response.status_code == 401:
+                        logger.warning("HIBP: Clave API inválida o no autorizada")
+                        break
+                    elif response.status_code == 404:
+                        # No se encontraron brechas para ese email
+                        logger.info("HIBP: No se encontraron brechas para este correo")
+                        break
                     else:
                         logger.warning(f"HIBP error: {response.status_code}")
-                        time.sleep(DELAY_BETWEEN_REQUESTS)
+                        if attempt < MAX_RETRIES - 1:
+                            time.sleep(DELAY_BETWEEN_REQUESTS)
                 except Exception as e:
                     logger.error(f"HIBP request failed: {e}")
-                    time.sleep(DELAY_BETWEEN_REQUESTS)
+                    if attempt < MAX_RETRIES - 1:
+                        time.sleep(DELAY_BETWEEN_REQUESTS)
+        elif not is_email:
+            logger.info("Consulta no es un correo electrónico válido. Omitiendo búsqueda en HIBP.")
         else:
             logger.warning("Clave HIBP no configurada para este usuario. No se puede buscar en breaches.")
 
-        # 2. Buscar en GitHub Gist
+        # 2. Buscar en GitHub Gist (siempre, sin filtro de email)
         if query.lower() in ["password", "email", "api_key", "cred"]:
             gists = search_gist_by_keyword(query)
             if gists:
@@ -93,7 +110,7 @@ def search_paste_sites(query: str, pastebin_api_key: str = None) -> List[Dict[st
                         "tags": ["code", "paste", "leak"]
                     })
 
-        # 3. Buscar en Leakatlas.com
+        # 3. Buscar en Leakatlas.com (siempre, sin filtro de email)
         if query.lower() in ["password", "email", "api_key"]:
             leakatlas_results = search_leakatlas(query)
             if leakatlas_results:
@@ -109,7 +126,7 @@ def search_paste_sites(query: str, pastebin_api_key: str = None) -> List[Dict[st
                         "tags": ["data leak", "breach"]
                     })
 
-        # 4. Buscar en Google Site Search
+        # 4. Buscar en Google Site Search (siempre, sin filtro de email)
         if query.lower() in ["password", "email", "api_key"]:
             google_results = search_google_site(query)
             if google_results:
@@ -125,7 +142,7 @@ def search_paste_sites(query: str, pastebin_api_key: str = None) -> List[Dict[st
                         "tags": ["public paste"]
                     })
 
-        # 5. Buscar en leaks (separado)
+        # 5. Buscar en leaks específicos (siempre)
         leak_results = search_leaks(query, user_id=user_id)
         results.extend(leak_results)
 
@@ -239,14 +256,16 @@ def search_leaks(query: str, user_id: int = None) -> List[Dict[str, Any]]:
 
     results = []
     try:
+        # Revisar si es un correo electrónico antes de buscar en HIBP
         hibp_key = config_manager.get_config(user_id, "hibp") if user_id else None
+        is_email = bool(re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', query.strip()))
 
-        if hibp_key:
+        if hibp_key and is_email:
             query_hash = quote_plus(query.lower().strip())
             url = f"{HIBP_BASE_URL}/{query_hash}"
             headers = {"x-apikey": hibp_key, "User-Agent": "QuasarIII/1.0"}
 
-            for _ in range(MAX_RETRIES):
+            for attempt in range(MAX_RETRIES):
                 try:
                     response = requests.get(url, headers=headers, timeout=10)
                     if response.status_code == 200:
@@ -262,12 +281,23 @@ def search_leaks(query: str, user_id: int = None) -> List[Dict[str, Any]]:
                                     "tags": ["breach", "data_leak", "credentials"]
                                 })
                         break
+                    elif response.status_code == 401:
+                        logger.warning("HIBP: Clave API inválida o no autorizada")
+                        break
+                    elif response.status_code == 404:
+                        # No se encontraron brechas para ese email
+                        logger.info("HIBP: No se encontraron brechas para este correo")
+                        break
                     else:
                         logger.warning(f"HIBP error: {response.status_code}")
-                        time.sleep(DELAY_BETWEEN_REQUESTS)
+                        if attempt < MAX_RETRIES - 1:
+                            time.sleep(DELAY_BETWEEN_REQUESTS)
                 except Exception as e:
                     logger.error(f"HIBP request failed: {e}")
-                    time.sleep(DELAY_BETWEEN_REQUESTS)
+                    if attempt < MAX_RETRIES - 1:
+                        time.sleep(DELAY_BETWEEN_REQUESTS)
+        elif not is_email:
+            logger.info("Consulta no es un correo electrónico válido. Omitiendo búsqueda en HIBP.")
         else:
             logger.warning("Clave HIBP no configurada. No se puede buscar leaks.")
 

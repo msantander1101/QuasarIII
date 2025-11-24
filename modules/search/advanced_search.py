@@ -337,21 +337,10 @@ class AdvancedSearcher:
             return {"error": f"Búsqueda dominio: {str(e)}"}
 
     def _search_dorks(self, query: str) -> Dict[str, Any]:
-        """Búsqueda de Google Dorks para el término dado.
+        """Búsqueda de Google Dorks para el término dado, usando claves de config_manager o entorno."""
 
-        Este método recupera, si existen, las claves API configuradas para SerpAPI
-        y Google Custom Search (CSE) mediante ``config_manager`` y las pasa al
-        módulo ``google_dorks``. Si no hay claves, se usa DuckDuckGo como
-        fallback.
-
-        Args:
-            query: El término a investigar.
-
-        Returns:
-            Diccionario con los resultados encontrados o un mensaje de error.
-        """
         try:
-            # Obtener las claves API configuradas para el usuario
+            # Leer claves del usuario actual
             serpapi_key = None
             google_api_key = None
             google_cx = None
@@ -363,12 +352,19 @@ class AdvancedSearcher:
             except Exception:
                 pass
 
+            # Fallback a variables de entorno
+            import os
+            serpapi_key = serpapi_key or os.getenv('SERPAPI_API_KEY')
+            google_api_key = google_api_key or os.getenv('GOOGLE_API_KEY')
+            google_cx = google_cx or os.getenv('GOOGLE_CUSTOM_SEARCH_CX')
+
             dork_results = google_dorks.search_google_dorks(
                 query,
                 serpapi_key=serpapi_key,
                 google_api_key=google_api_key,
                 google_cx=google_cx
             )
+
             return {
                 "source": "dorks",
                 "query": query,
@@ -380,7 +376,6 @@ class AdvancedSearcher:
             }
         except Exception as e:
             return {"error": f"Búsqueda dorks: {str(e)}"}
-
 
     def _search_generic(self, source: str, query: str) -> Dict[str, Any]:
         """Búsqueda genérica"""

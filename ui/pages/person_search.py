@@ -5,7 +5,8 @@ from modules.search.advanced_search import search_multiple_sources, search_with_
 from modules.search.relationship_search import suggest_relationships, find_connections
 from modules.search.emailint import check_email_breach
 from modules.search import archive_search
-from modules.search.darkweb import search_dark_web_catalog, get_available_onion_search_engines, check_onion_connectivity, get_darkweb_stats
+from modules.search.darkweb import search_dark_web_catalog, get_available_onion_search_engines, \
+    check_onion_connectivity, get_darkweb_stats
 from modules.search.pastesearch import search_paste_sites, search_leaks
 from core.db_manager import create_person, get_persons_by_user
 import json
@@ -140,7 +141,8 @@ def show_person_search_ui():
     col_actions = st.columns(5)
 
     with col_actions[0]:
-        if st.button("🔍 Buscar Personas", use_container_width=True, key="btn_search", help="Buscar personas con criterios"):
+        if st.button("🔍 Buscar Personas", use_container_width=True, key="btn_search",
+                     help="Buscar personas con criterios"):
             # Validar al menos un campo no vacío
             query_input = search_name or search_email or search_location or search_phone or search_domain
             if not query_input:
@@ -234,7 +236,8 @@ def show_person_search_ui():
             st.rerun()
 
     with col_actions[2]:
-        if st.button("🧩 Analizar Relaciones", use_container_width=True, key="btn_analyze", help="Analizar posibles relaciones"):
+        if st.button("🧩 Analizar Relaciones", use_container_width=True, key="btn_analyze",
+                     help="Analizar posibles relaciones"):
             if st.session_state.get('search_results') is None:
                 st.warning("⚠️ Primero busca personas antes de analizar relaciones")
                 return
@@ -245,13 +248,15 @@ def show_person_search_ui():
             st.rerun()
 
     with col_actions[3]:
-        if st.button("📊 Exportar Resultados", use_container_width=True, key="btn_export", help="Exportar resultados a archivo"):
+        if st.button("📊 Exportar Resultados", use_container_width=True, key="btn_export",
+                     help="Exportar resultados a archivo"):
             if st.session_state.get('search_results') is None:
                 st.warning("⚠️ No hay resultados para exportar")
                 return
 
             results = st.session_state['search_results']
-            total_count = sum(len(r.get('results', [])) for r in results.values() if isinstance(r, dict) and 'results' in r)
+            total_count = sum(
+                len(r.get('results', [])) for r in results.values() if isinstance(r, dict) and 'results' in r)
 
             st.info(f"📥 Exportando {total_count} resultados a archivo... (en desarrollo)")
             # Aquí se implementaría la exportación (CSV, JSON, etc.)
@@ -288,21 +293,29 @@ def show_person_search_ui():
                             person_location = person.get('location', 'N/A')
                             person_confidence = person.get('confidence', 0.8)
 
+                            # Extraer otros datos disponibles
+                            other_fields = []
+                            for key, value in person.items():
+                                if key not in ['name', 'email', 'phone', 'location', 'confidence']:
+                                    other_fields.append(
+                                        f"<p style='color: #b0b0c0; margin: 3px 0; font-size: 13px;'><strong>{key.title()}:</strong> {value}</p>")
+
                             person_card = f"""
-                            <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 20px; margin-bottom: 15px; 
-                                       background: white; box-shadow: 0 3px 10px rgba(0,0,0,0.08);">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <div style="background: #1e1e2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                       padding: 20px; margin-bottom: 15px; box-shadow: 0 3px 10px rgba(0,0,0,0.5);">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                                     <div>
-                                        <h3 style="margin: 0; color: #2c3e50; font-size: 18px;">{person_name}</h3>
-                                        <p style="color: #7f8c8d; margin: 5px 0; font-size: 14px;">
+                                        <h3 style="margin: 0; color: #ffffff; font-size: 20px;">{person_name}</h3>
+                                        <p style="color: #b0b0c0; margin: 8px 0; font-size: 14px;">
                                             <strong>Email:</strong> {person_email}<br/>
                                             <strong>Teléfono:</strong> {person_phone}<br/>
                                             <strong>Ubicación:</strong> {person_location}
                                         </p>
+                                        {" ".join(other_fields)}
                                     </div>
                                     <div style="text-align: right;">
                                         <span style="display: block; background: #28a745; color: white; 
-                                                   padding: 5px 10px; border-radius: 15px; font-size: 12px;">
+                                                   padding: 5px 15px; border-radius: 15px; font-size: 14px;">
                                             ⭐ {person_confidence:.2f}
                                         </span>
                                     </div>
@@ -352,26 +365,36 @@ def show_person_search_ui():
                             breach_value = email_info.get('breached', False) or email_info.get('breach_count', 0) > 0
                             breach_count = email_info.get('breach_count', 0)
                             sources_list = str(email_info.get('sources', [])) if 'sources' in email_info else 'API'
+
+                            # Extraer otros datos disponibles
+                            other_fields = []
+                            for key, value in email_info.items():
+                                if key not in ['email', 'breached', 'breach_count', 'sources']:
+                                    other_fields.append(
+                                        f"<p style='color: #b0b0c0; margin: 3px 0; font-size: 13px;'><strong>{key.title()}:</strong> {value}</p>")
+
                         else:
                             email_value = "Error de búsqueda"
                             breach_value = False
                             breach_count = 0
                             sources_list = "N/A"
+                            other_fields = []
 
                         email_card = f"""
-                        <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 15px; margin-bottom: 10px; 
-                                   background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
-                            <div style="display: flex; justify-content: space-between;">
-                                <h4 style="margin: 0; color: #2c3e50;">{email_value}</h4>
+                        <div style="background: #1e1e2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                   padding: 15px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.5);">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <h4 style="margin: 0; color: #ffffff;">{email_value}</h4>
                                 <span style="background: {'#28a745' if breach_value or breach_count > 0 else '#ffc107'}; 
-                                           color: white; padding: 3px 8px; border-radius: 10px; font-size: 12px;">
+                                           color: white; padding: 5px 10px; border-radius: 10px; font-size: 14px;">
                                     {'Comprometido' if breach_value or breach_count > 0 else 'Seguro'}
                                 </span>
                             </div>
-                            <p style="color: #7f8c8d; margin: 5px 0; font-size: 14px;">
+                            <p style="color: #b0b0c0; margin: 8px 0; font-size: 14px;">
                                 <strong>Breaches:</strong> {breach_count}<br/>
                                 <strong>Fuente:</strong> {sources_list}
                             </p>
+                            {" ".join(other_fields)}
                         </div>
                         """
                         st.markdown(email_card, unsafe_allow_html=True)
@@ -389,21 +412,29 @@ def show_person_search_ui():
                         posts_value = social_data.get('posts', 'N/A')
                         verified_value = social_data.get('verified', False)
 
+                        # Extraer otros datos disponibles
+                        other_fields = []
+                        for key, value in social_data.items():
+                            if key not in ['username', 'platform', 'followers', 'posts', 'verified']:
+                                other_fields.append(
+                                    f"<p style='color: #b0b0c0; margin: 3px 0; font-size: 13px;'><strong>{key.title()}:</strong> {value}</p>")
+
                         social_card = f"""
-                        <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 15px; margin-bottom: 10px; 
-                                   background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                        <div style="background: #1e1e2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                   padding: 15px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.5);">
                             <div style="display: flex; align-items: center;">
                                 <div style="flex: 1;">
-                                    <h4 style="margin: 0; color: #2c3e50;">@{username_value}</h4>
-                                    <p style="color: #7f8c8d; margin: 5px 0; font-size: 14px;">
+                                    <h4 style="margin: 0; color: #ffffff;">@{username_value}</h4>
+                                    <p style="color: #b0b0c0; margin: 8px 0; font-size: 14px;">
                                         <strong>Plataforma:</strong> {platform_value}<br/>
                                         <strong>Seguidores:</strong> {followers_value}<br/>
                                         <strong>Posteos:</strong> {posts_value}
                                     </p>
+                                    {" ".join(other_fields)}
                                 </div>
                                 <div style="text-align: right;">
                                     <span style="display: block; background: #007bff; color: white; 
-                                               padding: 5px 10px; border-radius: 15px; font-size: 12px;">
+                                               padding: 5px 10px; border-radius: 15px; font-size: 14px;">
                                         {'Verificado' if verified_value else 'No verificado'}
                                     </span>
                                 </div>
@@ -423,13 +454,13 @@ def show_person_search_ui():
                                     if 'error' not in capture and 'url' in capture:
                                         details = capture.get('timestamp_human', capture.get('url', 'Unknown'))
                                         st.markdown(f"""
-                                        <div style="border: 1px solid #e9ecef; border-radius: 8px; padding: 10px; margin-bottom: 10px; 
-                                                   background: #f8f9fa;">
-                                            <h5 style="margin: 0; color: #2c3e50;">{details}</h5>
+                                        <div style="background: #1e1e2e; border: 1px solid #3a3a4c; border-radius: 8px; 
+                                                   padding: 10px; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                                            <h5 style="margin: 0; color: #ffffff;">{details}</h5>
                                             <a href="{capture.get('url', '#')}" target="_blank" style="color: #3498db;">
                                                 🌐 Ver captura completa
                                             </a>
-                                            {f'<p style="color: #7f8c8d; font-size: 14px;">Confianza: {capture.get("confidence", 0.9):.2f}</p>' if 'confidence' in capture else ''}
+                                            {f'<p style="color: #b0b0c0; font-size: 14px;">Confianza: {capture.get("confidence", 0.9):.2f}</p>' if 'confidence' in capture else ''}
                                         </div>
                                         """, unsafe_allow_html=True)
 
@@ -438,16 +469,26 @@ def show_person_search_ui():
                     st.markdown(f"### 🌍 Resultados Web")
                     web_results = source_results['results']
                     total_count += len(web_results)
+
                     for i, web_item in enumerate(web_results):
                         title = web_item.get('title', 'Sin título')
                         url_val = web_item.get('url', '#')
                         snippet = web_item.get('snippet', '')
                         confidence = web_item.get('confidence', 0.0)
+
+                        # Extraer otros datos disponibles
+                        other_fields = []
+                        for key, value in web_item.items():
+                            if key not in ['title', 'url', 'snippet', 'confidence']:
+                                other_fields.append(
+                                    f"<p style='color: #b0b0c0; margin: 3px 0; font-size: 13px;'><strong>{key.title()}:</strong> {value}</p>")
+
                         web_card = f"""
-                        <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 15px; margin-bottom: 10px; 
-                                   background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
-                            <h4 style="margin: 0; color: #2c3e50;">{title}</h4>
-                            <p style="color: #7f8c8d; margin: 5px 0; font-size: 14px;">{snippet}</p>
+                        <div style="background: #1e1e2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                   padding: 15px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.5);">
+                            <h4 style="margin: 0; color: #ffffff;">{title}</h4>
+                            <p style="color: #b0b0c0; margin: 8px 0; font-size: 14px;">{snippet}</p>
+                            {" ".join(other_fields)}
                             <a href="{url_val}" target="_blank" style="color: #3498db; text-decoration: none; font-size: 14px;">🔗 Abrir enlace</a>
                             <div style="margin-top: 5px;">
                                 <span style="display: inline-block; background: #17a2b8; color: white; padding: 3px 8px; 
@@ -467,9 +508,10 @@ def show_person_search_ui():
                         dork_url = dork_item.get('url', '#')
                         dork_title = dork_item.get('title', 'Dork')
                         dork_confidence = dork_item.get('confidence', 0.0)
-                        # Subresultados web obtenidos (si existen)
+
+                        # Subresultados del dork (pueden venir de SerpAPI, Google CSE o DuckDuckGo)
                         subresults = dork_item.get('results', []) if isinstance(dork_item, dict) else []
-                        # Construir HTML para mostrar subresultados
+
                         subresults_html = ""
                         if subresults:
                             subresults_html += "<ul style='margin-top: 10px;'>"
@@ -478,24 +520,50 @@ def show_person_search_ui():
                                 url_link = sub.get('url', '#')
                                 snippet = sub.get('snippet', '')
                                 confidence_sub = sub.get('confidence', 0.0)
-                                subresults_html += f"<li style='margin-bottom:8px;'>"
-                                subresults_html += f"<a href='{url_link}' target='_blank' style='color:#007bff; font-weight:600;'>{title}</a>"
+
+                                # Extraer datos adicionales de los subresultados
+                                sub_fields = []
+                                for key, value in sub.items():
+                                    if key not in ['title', 'url', 'snippet', 'confidence']:
+                                        sub_fields.append(
+                                            f"<br/><span style='font-size:12px; color:#b0b0c0;'>{key.title()}: {value}</span>")
+
+                                subresults_html += (
+                                    f"<li style='margin-bottom:8px; color: #b0b0c0; font-size: 12px;'>"
+                                    f"<a href='{url_link}' target='_blank' style='color:#3498db; font-weight:600;'>{title}</a>"
+                                )
                                 if snippet:
-                                    subresults_html += f"<br/><span style='font-size:13px; color:#555;'>{snippet}</span>"
-                                subresults_html += f"<br/><span style='font-size:11px; color:#6c757d;'>Confianza: {confidence_sub:.2f}</span>"
-                                subresults_html += "</li>"
+                                    subresults_html += f"<br/><span style='font-size:13px; color:#b0b0c0;'>{snippet}</span>"
+                                subresults_html += (
+                                    f"<br/><span style='font-size:11px; color:#b0b0c0;'>Confianza: {confidence_sub:.2f}</span>"
+                                    f"{''.join(sub_fields)}"
+                                    "</li>"
+                                )
                             subresults_html += "</ul>"
+
+                        # Extraer datos adicionales del dork principal
+                        dork_fields = []
+                        for key, value in dork_item.items():
+                            if key not in ['query', 'url', 'title', 'confidence', 'results']:
+                                dork_fields.append(
+                                    f"<p style='color: #b0b0c0; margin: 3px 0; font-size: 13px;'><strong>{key.title()}:</strong> {value}</p>")
+
                         dork_card = f"""
-                        <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 15px; margin-bottom: 10px; 
-                                   background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
-                            <h4 style="margin: 0; color: #2c3e50;">{dork_title}</h4>
-                            <p style="color: #7f8c8d; margin: 5px 0; font-size: 14px;">
-                                Consulta Dork: <code>{dork_query}</code>
+                        <div style="background: #1e1e2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                   padding: 15px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.5);">
+                            <h4 style="margin: 0; color: #ffffff;">{dork_title}</h4>
+                            <p style="color: #b0b0c0; margin: 8px 0; font-size: 14px;">
+                                Consulta Dork: <code style="color: #3498db; background: #2d2d3d; padding: 2px 5px; border-radius: 3px;">{dork_query}</code>
                             </p>
-                            <a href="{dork_url}" target="_blank" style="color: #3498db; text-decoration: none; font-size: 14px;">🔗 Ver búsqueda en Google</a>
+                            {" ".join(dork_fields)}
+                            <a href="{dork_url}" target="_blank" style="color: #3498db; text-decoration: none; font-size: 14px;">
+                                🔗 Ver búsqueda en Google
+                            </a>
                             <div style="margin-top: 5px;">
-                                <span style="display: inline-block; background: #6f42c1; color: white; padding: 3px 8px; 
-                                           border-radius: 10px; font-size: 12px;">Confianza: {dork_confidence:.2f}</span>
+                                <span style="display: inline-block; background: #6f42c1; color: white; padding: 3px 8px;
+                                           border-radius: 10px; font-size: 12px;">
+                                    Confianza: {dork_confidence:.2f}
+                                </span>
                             </div>
                             {subresults_html}
                         </div>
@@ -541,15 +609,23 @@ def show_person_search_ui():
                             if isinstance(engine_results, list) and engine_results:
                                 with st.expander(f"🔍 {engine_name}"):
                                     for j, result in enumerate(engine_results[:3]):
-                                        if 'title' in result:
-                                            st.markdown(f"""
-                                            <div style="border-left: 4px solid #e74c3c; padding: 10px; margin: 10px 0;">
-                                                <h4 style="color: #e74c3c; margin: 0;">{result.get('title', 'Título sin especificar')}</h4>
-                                                <p style="color: #6c757d; margin: 5px 0;"><strong>Fuente:</strong> {result.get('source', 'Desconocida')}</p>
-                                                <p style="margin: 0;">{result.get('description', 'Sin descripción')}</p>
-                                                <a href="{result.get('url', '#')}" target="_blank" style="color: #3498db;">Ver detalles</a>
-                                            </div>
-                                            """, unsafe_allow_html=True)
+                                        # Extraer datos adicionales de los resultados dark web
+                                        other_fields = []
+                                        for key, value in result.items():
+                                            if key not in ['title', 'source', 'description', 'url']:
+                                                other_fields.append(
+                                                    f"<p style='color: #b0b0c0; margin: 3px 0; font-size: 13px;'><strong>{key.title()}:</strong> {value}</p>")
+
+                                        st.markdown(f"""
+                                        <div style="border-left: 4px solid #e74c3c; padding: 10px; margin: 10px 0; 
+                                                   background: #1e1e2e; border-radius: 0 8px 8px 0;">
+                                            <h4 style="color: #e74c3c; margin: 0;">{result.get('title', 'Título sin especificar')}</h4>
+                                            <p style="color: #b0b0c0; margin: 5px 0;"><strong>Fuente:</strong> {result.get('source', 'Desconocida')}</p>
+                                            <p style="margin: 0;">{result.get('description', 'Sin descripción')}</p>
+                                            {" ".join(other_fields)}
+                                            <a href="{result.get('url', '#')}" target="_blank" style="color: #3498db;">Ver detalles</a>
+                                        </div>
+                                        """, unsafe_allow_html=True)
 
             except Exception as e:
                 st.warning(f"Error al mostrar resultados de {source_type}: {str(e)}")
@@ -584,7 +660,8 @@ def show_person_search_ui():
                 for i, result in enumerate(paste_results):
                     with st.expander(f"📄 {result['title']} ({result['source']})", expanded=False):
                         st.markdown(f"""
-                        <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; padding: 15px; color: #e6e6fa;">
+                        <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                   padding: 15px; color: #e6e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
                             <h5 style="margin: 0; color: #ffffff;">{result['title']}</h5>
                             <p style="color: #b0b0c0; font-size: 14px;">
                                 <strong>Fecha:</strong> {result.get('date', 'Desconocida')}<br/>
@@ -629,46 +706,47 @@ def show_person_search_ui():
                 except Exception as e:
                     st.error(f"Error al detectar relaciones: {e}")
 
-    # Estado de Tor y dark web
-    if 'search_results' in st.session_state and st.session_state['search_results']:
-        st.markdown("---")
-        st.subheader("📡 Estado de Conexión")
+                # Estado de Tor y dark web
+            if 'search_results' in st.session_state and st.session_state['search_results']:
+                st.markdown("---")
+                st.subheader("📡 Estado de Conexión")
 
-        try:
-            tor_status = check_onion_connectivity()
-            if tor_status:
-                st.success("✅ Conexión Tor: ACTIVA")
-                from utils.tor_proxy import get_tor_ip
-                ip_info = get_tor_ip()
-                if ip_info.get('ip'):
-                    st.info(f"IP Anónima: {ip_info['ip']}")
-            else:
-                st.warning("⚠️ Conexión Tor: NO DISPONIBLE")
-                st.info("Asegúrate de que Tor esté corriendo en 127.0.0.1:9050.")
+                try:
+                    tor_status = check_onion_connectivity()
+                    if tor_status:
+                        st.success("✅ Conexión Tor: ACTIVA")
+                        from utils.tor_proxy import get_tor_ip
+                        ip_info = get_tor_ip()
+                        if ip_info.get('ip'):
+                            st.info(f"IP Anónima: {ip_info['ip']}")
+                    else:
+                        st.warning("⚠️ Conexión Tor: NO DISPONIBLE")
+                        st.info("Asegúrate de que Tor esté corriendo en 127.0.0.1:9050.")
 
-        except Exception as e:
-            st.warning(f"⚠️ Error verificando conexión Tor: {e}")
+                except Exception as e:
+                    st.warning(f"⚠️ Error verificando conexión Tor: {e}")
 
-        try:
-            stats = get_darkweb_stats()
-            st.markdown("### 🌐 Estadísticas de Dark Web")
-            st.info(f"🟢 Conexión Onion: {'ACTIVA' if stats.get('tor_connectivity', False) else 'DESACTIVADA'}")
-            st.info(f"📚 Motores disponibles: {stats.get('supported_sources', 0)}/{stats.get('total_sources', 0)}")
-        except Exception as e:
-            st.info("📊 No se pudieron cargar estadísticas de dark web.")
+                try:
+                    stats = get_darkweb_stats()
+                    st.markdown("### 🌐 Estadísticas de Dark Web")
+                    st.info(f"🟢 Conexión Onion: {'ACTIVA' if stats.get('tor_connectivity', False) else 'DESACTIVADA'}")
+                    st.info(
+                        f"📚 Motores disponibles: {stats.get('supported_sources', 0)}/{stats.get('total_sources', 0)}")
+                except Exception as e:
+                    st.info("📊 No se pudieron cargar estadísticas de dark web.")
 
-        # Recomendaciones de seguridad
-        st.markdown("### 🔐 Recomendaciones de Seguridad")
-        st.info("""
-        - Asegúrate de tener Tor corriendo en tu máquina (127.0.0.1:9050)
-        - Usa claves API con acceso mínimo
-        - Analiza datos sensibles en entornos anónimos
-        - Cambia tu identidad de Tor periódicamente para mantener privacidad
-        """)
+                # Recomendaciones de seguridad
+                st.markdown("### 🔐 Recomendaciones de Seguridad")
+                st.info("""
+                    - Asegúrate de tener Tor corriendo en tu máquina (127.0.0.1:9050)
+                    - Usa claves API con acceso mínimo
+                    - Analiza datos sensibles en entornos anónimos
+                    - Cambia tu identidad de Tor periódicamente para mantener privacidad
+                    """)
 
-    # Botón para volver al dashboard
-    if st.button(" ← Volver al Dashboard", use_container_width=True):
-        st.session_state['page'] = 'dashboard'
-        st.session_state['search_results'] = None
-        st.session_state['darkweb_results'] = None
-        st.rerun()
+                # Botón para volver al dashboard
+            if st.button(" ← Volver al Dashboard", use_container_width=True):
+                st.session_state['page'] = 'dashboard'
+                st.session_state['search_results'] = None
+                st.session_state['darkweb_results'] = None
+                st.rerun()

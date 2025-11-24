@@ -7,6 +7,7 @@ from modules.search.emailint import check_email_breach
 from modules.search import archive_search
 from modules.search.darkweb import search_dark_web_catalog, get_available_onion_search_engines, \
     check_onion_connectivity, get_darkweb_stats
+
 from modules.search.pastesearch import search_paste_sites, search_leaks
 from core.db_manager import create_person, get_persons_by_user
 import json
@@ -651,7 +652,7 @@ def show_person_search_ui():
             if not query:
                 st.info("🔍 No se encontraron resultados de paste o leaks (no se ha buscado un término clave)")
                 return
-
+            from modules.search.pastesearch import search_paste_sites
             # 🔍 Llama a la función de búsqueda real
             paste_results = search_paste_sites(query)
 

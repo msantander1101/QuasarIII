@@ -95,7 +95,7 @@ def search_paste_sites(query: str, pastebin_api_key: str = None) -> List[Dict[st
             logger.warning("Clave HIBP no configurada para este usuario. No se puede buscar en breaches.")
 
         # 2. Buscar en GitHub Gist (siempre, sin filtro de email)
-        if query.lower() in ["password", "email", "api_key", "cred"]:
+        if len(query) > 2:
             gists = search_gist_by_keyword(query)
             if gists:
                 for gist in gists:

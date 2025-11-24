@@ -17,6 +17,10 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
+# ui/pages/person_search.py
+
+# ... [resto del código existente] ...
+
 def show_person_search_ui():
     """
     Interfaz moderna y robusta con búsqueda avanzada multifuncional.
@@ -620,7 +624,7 @@ def show_person_search_ui():
                                         <div style="border-left: 4px solid #e74c3c; padding: 10px; margin: 10px 0; 
                                                    background: #1e1e2e; border-radius: 0 8px 8px 0;">
                                             <h4 style="color: #e74c3c; margin: 0;">{result.get('title', 'Título sin especificar')}</h4>
-                                            <p style="color: #b0b0c0; margin: 5px 0;"><strong>Fuente:</strong> {result.get('source', 'Desconocida')}</p>
+                                                                                    <p style="color: #b0b0c0; margin: 5px 0;"><strong>Fuente:</strong> {result.get('source', 'Desconocida')}</p>
                                             <p style="margin: 0;">{result.get('description', 'Sin descripción')}</p>
                                             {" ".join(other_fields)}
                                             <a href="{result.get('url', '#')}" target="_blank" style="color: #3498db;">Ver detalles</a>
@@ -706,47 +710,136 @@ def show_person_search_ui():
                 except Exception as e:
                     st.error(f"Error al detectar relaciones: {e}")
 
-                # Estado de Tor y dark web
-            if 'search_results' in st.session_state and st.session_state['search_results']:
-                st.markdown("---")
-                st.subheader("📡 Estado de Conexión")
+    # --- Nueva sección de búsqueda de documentos locales ---
+    # Sección para búsqueda en documentos locales
+    if st.session_state.get('search_results') is not None:
+        st.markdown("---")
+        st.subheader("📁 Búsqueda de Documentos Locales")
 
-                try:
-                    tor_status = check_onion_connectivity()
-                    if tor_status:
-                        st.success("✅ Conexión Tor: ACTIVA")
-                        from utils.tor_proxy import get_tor_ip
-                        ip_info = get_tor_ip()
-                        if ip_info.get('ip'):
-                            st.info(f"IP Anónima: {ip_info['ip']}")
-                    else:
-                        st.warning("⚠️ Conexión Tor: NO DISPONIBLE")
-                        st.info("Asegúrate de que Tor esté corriendo en 127.0.0.1:9050.")
+        # Campo para especificar directorio de búsqueda
+        search_directory = st.text_input(
+            "📂 Directorio de Búsqueda",
+            key="search_directory",
+            placeholder="/ruta/a/documentos/",
+            help="Ruta al directorio donde buscar documentos"
+        )
 
-                except Exception as e:
-                    st.warning(f"⚠️ Error verificando conexión Tor: {e}")
+        # Campo para especificar extensiones
+        search_extensions = st.text_input(
+            "📄 Extensiones (separadas por coma)",
+            key="search_extensions",
+            placeholder=".pdf,.docx,.doc",
+            value=".pdf,.docx,.doc",
+            help="Extensiones de archivo a buscar (ej: .pdf,.docx)"
+        )
 
-                try:
-                    stats = get_darkweb_stats()
-                    st.markdown("### 🌐 Estadísticas de Dark Web")
-                    st.info(f"🟢 Conexión Onion: {'ACTIVA' if stats.get('tor_connectivity', False) else 'DESACTIVADA'}")
-                    st.info(
-                        f"📚 Motores disponibles: {stats.get('supported_sources', 0)}/{stats.get('total_sources', 0)}")
-                except Exception as e:
-                    st.info("📊 No se pudieron cargar estadísticas de dark web.")
+        # Botón para buscar documentos locales
+        if st.button("🔍 Buscar Documentos Locales", use_container_width=True):
+            if not search_directory:
+                st.warning("⚠️ Por favor, introduce una ruta de directorio.")
+                return
 
-                # Recomendaciones de seguridad
-                st.markdown("### 🔐 Recomendaciones de Seguridad")
-                st.info("""
-                    - Asegúrate de tener Tor corriendo en tu máquina (127.0.0.1:9050)
-                    - Usa claves API con acceso mínimo
-                    - Analiza datos sensibles en entornos anónimos
-                    - Cambia tu identidad de Tor periódicamente para mantener privacidad
-                    """)
+            try:
+                # Importar aquí para evitar problemas de dependencias
+                from modules.search.documentint import find_all_documents_in_directory, search_in_multiple_documents
 
-                # Botón para volver al dashboard
-            if st.button(" ← Volver al Dashboard", use_container_width=True):
-                st.session_state['page'] = 'dashboard'
-                st.session_state['search_results'] = None
-                st.session_state['darkweb_results'] = None
-                st.rerun()
+                # Parsear las extensiones
+                extensions = [ext.strip() for ext in search_extensions.split(",") if ext.strip()]
+
+                # Buscar documentos en el directorio
+                st.info(f"🔍 Buscando documentos en: {search_directory}")
+                with st.spinner("📁 Escaneando directorio..."):
+                    documents = find_all_documents_in_directory(search_directory, extensions)
+
+                if documents:
+                    st.success(f"✅ Encontrados {len(documents)} documentos")
+
+                    # Campo para términos de búsqueda en documentos
+                    search_terms = st.text_input(
+                        "🔍 Términos de búsqueda en documentos",
+                        key="document_search_terms",
+                        placeholder="palabra clave 1, palabra clave 2...",
+                        help="Términos separados por coma"
+                    )
+
+                    if search_terms:
+                        # Convertir términos a lista
+                        terms_list = [term.strip() for term in search_terms.split(",") if term.strip()]
+
+                        if terms_list:
+                            st.info(f"🔎 Buscando términos en documentos: {', '.join(terms_list)}")
+
+                            # Buscar en documentos
+                            with st.spinner("🔍 Buscando términos en documentos..."):
+                                doc_results = search_in_multiple_documents(
+                                    [doc['path'] for doc in documents],
+                                    terms_list
+                                )
+
+                            # Mostrar resultados
+                            for doc_filename, result in doc_results.items():
+                                if result["results"]:
+                                    st.markdown(f"### 📄 {doc_filename}")
+                                    st.markdown(f"**Ruta:** {result['path']}")
+                                    st.markdown(f"**Resultados:** {result['found_terms']} términos encontrados")
+                                    for res in result["results"]:
+                                        if "term" in res:
+                                            st.markdown(f"- **Término:** {res['term']}")
+                                            st.markdown(f"  - Coincidencias: {res.get('total_matches', 0)}");
+                                            if 'previews' in res:
+                                                for i, preview in enumerate(res['previews']):
+                                                    st.markdown(f"    - Vista previa {i+1}: {preview['preview']}")
+                                else:
+                                    st.markdown(f"### 📄 {doc_filename}")
+                                    st.markdown("**No se encontraron términos coincidentes**")
+
+                else:
+                    st.warning("⚠️ No se encontraron documentos en el directorio especificado.")
+
+            except Exception as e:
+                st.error(f"❌ Error buscando documentos: {str(e)}")
+                logger.error(f"Error al buscar documentos: {e}")
+
+    # Estado de Tor y dark web
+    if 'search_results' in st.session_state and st.session_state['search_results']:
+        st.markdown("---")
+        st.subheader("📡 Estado de Conexión")
+
+        try:
+            tor_status = check_onion_connectivity()
+            if tor_status:
+                st.success("✅ Conexión Tor: ACTIVA")
+                from utils.tor_proxy import get_tor_ip
+                ip_info = get_tor_ip()
+                if ip_info.get('ip'):
+                    st.info(f"IP Anónima: {ip_info['ip']}")
+            else:
+                st.warning("⚠️ Conexión Tor: NO DISPONIBLE")
+                st.info("Asegúrate de que Tor esté corriendo en 127.0.0.1:9050.")
+
+        except Exception as e:
+            st.warning(f"⚠️ Error verificando conexión Tor: {e}")
+
+        try:
+            stats = get_darkweb_stats()
+            st.markdown("### 🌐 Estadísticas de Dark Web")
+            st.info(f"🟢 Conexión Onion: {'ACTIVA' if stats.get('tor_connectivity', False) else 'DESACTIVADA'}")
+            st.info(f"📚 Motores disponibles: {stats.get('supported_sources', 0)}/{stats.get('total_sources', 0)}")
+        except Exception as e:
+            st.info("📊 No se pudieron cargar estadísticas de dark web.")
+
+        # Recomendaciones de seguridad
+        st.markdown("### 🔐 Recomendaciones de Seguridad")
+        st.info("""
+        - Asegúrate de tener Tor corriendo en tu máquina (127.0.0.1:9050)
+        - Usa claves API con acceso mínimo
+        - Analiza datos sensibles en entornos anónimos
+        - Cambia tu identidad de Tor periódicamente para mantener privacidad
+        """)
+
+    # Botón para volver al dashboard
+    if st.button(" ← Volver al Dashboard", use_container_width=True):
+        st.session_state['page'] = 'dashboard'
+        st.session_state['search_results'] = None
+        st.session_state['darkweb_results'] = None
+        st.rerun()

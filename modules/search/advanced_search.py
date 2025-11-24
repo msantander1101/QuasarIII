@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 # Importar los módulos reales
 from . import people_search, emailint
+# Importar módulo de Google Dorks para integrar búsquedas avanzadas
+from . import google_dorks
 
 
 @dataclass
@@ -44,6 +46,8 @@ class AdvancedSearcher:
         Búsqueda múltiple en fuentes especificadas con datos reales
         """
         if sources is None:
+            # Incluir 'dorks' como fuente opcional.  Se omite por defecto para
+            # no sobrecargar búsquedas, pero se puede pasar explícitamente.
             sources = ['people', 'email', 'social', 'web']
 
         start_time = time.time()
@@ -65,6 +69,9 @@ class AdvancedSearcher:
                         futures[executor.submit(self._search_web, query)] = source
                     elif source == 'domain':
                         futures[executor.submit(self._search_domain, query)] = source
+                    elif source == 'dorks':
+                        # Integrar búsqueda de Google Dorks
+                        futures[executor.submit(self._search_dorks, query)] = source
                     else:
                         futures[executor.submit(self._search_generic, source, query)] = source
 
@@ -328,6 +335,33 @@ class AdvancedSearcher:
             }
         except Exception as e:
             return {"error": f"Búsqueda dominio: {str(e)}"}
+
+    def _search_dorks(self, query: str) -> Dict[str, Any]:
+        """Búsqueda de Google Dorks para el término dado.
+
+        Este método usa el módulo ``google_dorks`` para generar consultas dorks
+        combinando patrones avanzados de búsqueda con la consulta del usuario.
+        Devuelve un diccionario con la estructura estándar esperada por la UI.
+
+        Args:
+            query: El término a investigar.
+
+        Returns:
+            Diccionario con los resultados encontrados o un mensaje de error.
+        """
+        try:
+            dork_results = google_dorks.search_google_dorks(query)
+            return {
+                "source": "dorks",
+                "query": query,
+                "results": dork_results,
+                "metadata": {
+                    "total_results": len(dork_results),
+                    "search_time": time.time()
+                }
+            }
+        except Exception as e:
+            return {"error": f"Búsqueda dorks: {str(e)}"}
 
 
     def _search_generic(self, source: str, query: str) -> Dict[str, Any]:

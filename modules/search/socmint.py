@@ -31,59 +31,53 @@ class SocmintSearcher:
         })
         self.timeout = 30
 
-    def search_social_profiles(self, username: str, platforms: List[str] = None) -> Dict[str, Any]:
+    def search_social_profiles(self, username: str, platforms: List[str] | None = None) -> Dict[str, Any]:
         """
-        Búsqueda de perfiles en redes sociales utilizando herramientas OSINT como Maigret y Sherlock.
-
-        Este método delega la búsqueda en ``people_search.search_social_profiles`` para
-        aprovechar las integraciones de Maigret y Sherlock ya implementadas.  A partir
-        del resultado de estas herramientas se construye una lista de perfiles
-        encontrados en distintas plataformas.  Si una herramienta devuelve un
-        mensaje de error o advertencia, se recopila en la lista de ``errors``.
-        Si ninguna cuenta se encuentra, la lista ``profiles_found`` estará vacía.
+        Busca perfiles sociales para un nombre de usuario utilizando las herramientas
+        externas Maigret y Sherlock. Para evitar dependencias circulares y
+        desacoplar este módulo de la implementación interna de ``people_search``,
+        se crea una instancia de ``PeopleSearcher`` localmente y se invoca su
+        método ``search_social_profiles``. A partir de la salida de esas
+        herramientas, este método construye una lista de perfiles y recopila
+        posibles errores.
 
         Args:
-            username: Nombre de usuario o identificador a buscar.
-            platforms: Lista opcional de plataformas donde filtrar los resultados.  Si se
-                proporciona, solo se incluirán los resultados que coincidan con las
-                plataformas indicadas.  Caso contrario, se incluirán todas.
+            username: El nombre de usuario o identificador a consultar.
+            platforms: Lista opcional de plataformas para filtrar los resultados.
 
         Returns:
             Un diccionario con los perfiles encontrados y metadatos asociados.
         """
-        # Utilizar PeopleSearcher directamente para evitar ambigüedades.
-        # La clase ``PeopleSearcher`` encapsula la ejecución de Maigret y
-        # Sherlock y proporciona un método `search_social_profiles` que
-        # devuelve un diccionario con los resultados de cada herramienta.
+        from .people_search import PeopleSearcher
+        # Instanciar un buscador independiente para esta consulta
         try:
-            from .people_search import PeopleSearcher
             searcher = PeopleSearcher()
-            tool_results = searcher.search_social_profiles(username)
-        except Exception as e:
-            logger.error(f"Error ejecutando búsqueda con Maigret/Sherlock: {e}")
+            tool_results = searcher.search_social_profiles(username, platforms)
+        except Exception as exc:
+            logger.error(f"Error ejecutando herramientas OSINT: {exc}")
             return {
                 "query": username,
                 "platforms_searched": platforms or [],
                 "timestamp": time.time(),
                 "profiles_found": [],
                 "total_profiles": 0,
-                "errors": [f"Error ejecutando herramientas OSINT: {e}"]
+                "errors": [f"Error ejecutando herramientas OSINT: {exc}"]
             }
 
         profiles_found: List[Dict[str, Any]] = []
         errors: List[str] = []
 
-        # Procesar los resultados de cada herramienta (maigret, sherlock)
+        # tool_results es un diccionario con claves 'maigret' y 'sherlock'
         if isinstance(tool_results, dict):
             for tool_name, data in tool_results.items():
                 if not data:
                     continue
-                # Si devuelve un error o advertencia, recopilar
+                # Manejar errores o advertencias
                 if isinstance(data, dict) and (data.get('error') or data.get('warning')):
                     msg = data.get('error') or data.get('warning')
                     errors.append(f"{tool_name}: {msg}")
                     continue
-                # Si hay salida cruda, almacenar como un único perfil con raw_output
+                # Salida sin formato (no JSON)
                 if isinstance(data, dict) and data.get('raw_output'):
                     profiles_found.append({
                         'platform': tool_name,
@@ -96,36 +90,38 @@ class SocmintSearcher:
                         'raw_output': data.get('raw_output')
                     })
                     continue
-                # De lo contrario se asume que data es un diccionario de sitios
+                # Data con formatos por sitio
                 if isinstance(data, dict):
                     for site, details in data.items():
                         try:
-                            if isinstance(details, dict):
-                                # Determinar si el perfil existe (status/state/exists)
-                                status = details.get('status') or details.get('state') or details.get('exists')
-                                exists = False
-                                if isinstance(status, str):
-                                    exists = status.lower() in ['claimed', 'found', 'exists', 'true', 'yes']
-                                elif isinstance(status, bool):
-                                    exists = status
-                                else:
-                                    # Si no hay estado, asumimos que la entrada es válida
-                                    exists = True
-                                if not exists:
-                                    continue
-                                profile = {
-                                    'platform': site,
-                                    'username': username,
-                                    'followers': details.get('followers', 'N/A'),
-                                    'posts': details.get('posts', details.get('videos', 'N/A')),
-                                    'verified': details.get('verified', False),
-                                    'url': details.get('url') or details.get('url_main'),
-                                    'source': tool_name
-                                }
-                                # Si el usuario especificó plataformas concretas, filtrar
-                                if platforms and site.lower() not in [p.lower() for p in platforms]:
-                                    continue
-                                profiles_found.append(profile)
+                            if not isinstance(details, dict):
+                                errors.append(f"{tool_name}-{site}: formato no soportado")
+                                continue
+                            # Determinar existencia
+                            status = details.get('status') or details.get('state') or details.get('exists')
+                            exists = False
+                            if isinstance(status, str):
+                                exists = status.lower() in ['claimed', 'found', 'exists', 'true', 'yes']
+                            elif isinstance(status, bool):
+                                exists = status
+                            else:
+                                exists = True
+                            if not exists:
+                                continue
+                            # Construir perfil
+                            profile = {
+                                'platform': site,
+                                'username': username,
+                                'followers': details.get('followers', 'N/A'),
+                                'posts': details.get('posts', details.get('videos', 'N/A')),
+                                'verified': details.get('verified', False),
+                                'url': details.get('url') or details.get('url_main'),
+                                'source': tool_name
+                            }
+                            # Filtrar por plataformas solicitadas
+                            if platforms and site.lower() not in [p.lower() for p in platforms]:
+                                continue
+                            profiles_found.append(profile)
                         except Exception as ex:
                             errors.append(f"{tool_name}-{site}: parsing error {ex}")
                 else:

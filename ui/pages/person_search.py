@@ -107,7 +107,7 @@ def show_person_search_ui():
         # Selector de fuentes (con mejor UX y validación)
         search_sources = st.multiselect(
             "🌐 Fuentes",
-            options=["all", "people", "email", "social", "domain", "web", "darkweb"],
+            options=["all", "people", "email", "social", "domain", "web", "darkweb", "dorks"],
             default=["all"],
             key="search_sources",
             help="Selecciona las fuentes a usar en la búsqueda"
@@ -167,8 +167,19 @@ def show_person_search_ui():
             try:
                 with st.spinner("🔍 Realizando búsqueda avanzada con múltiples fuentes..."):
                     # Determinar fuentes reales a usar
+                    # Si el usuario elige "all", incluir todas las fuentes disponibles, incluido dorks
                     if "all" in search_sources:
-                        selected_sources = ["people", "email", "social", "domain", "web", "darkweb"]
+                        # Enumerar todas las fuentes soportadas por el buscador avanzado.  Se incluye
+                        # la opción "dorks" para aprovechar las búsquedas Google Dorks
+                        selected_sources = [
+                            "people",
+                            "email",
+                            "social",
+                            "domain",
+                            "web",
+                            "darkweb",
+                            "dorks",
+                        ]
                     else:
                         selected_sources = search_sources
 
@@ -446,6 +457,33 @@ def show_person_search_ui():
                         """
                         st.markdown(web_card, unsafe_allow_html=True)
 
+                # Resultados de Dorks
+                elif source_type == 'dorks' and isinstance(source_results, dict) and 'results' in source_results:
+                    st.markdown(f"### 🔎 Resultados de Google Dorks")
+                    dork_results = source_results['results']
+                    total_count += len(dork_results)
+                    for i, dork_item in enumerate(dork_results):
+                        # Cada elemento es un diccionario con la consulta y URL del dork
+                        dork_query = dork_item.get('query', '')
+                        dork_url = dork_item.get('url', '#')
+                        dork_title = dork_item.get('title', 'Dork')
+                        dork_confidence = dork_item.get('confidence', 0.0)
+                        dork_card = f"""
+                        <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 15px; margin-bottom: 10px; 
+                                   background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                            <h4 style="margin: 0; color: #2c3e50;">{dork_title}</h4>
+                            <p style="color: #7f8c8d; margin: 5px 0; font-size: 14px;">
+                                Consulta Dork: <code>{dork_query}</code>
+                            </p>
+                            <a href="{dork_url}" target="_blank" style="color: #3498db; text-decoration: none; font-size: 14px;">🔗 Ver búsqueda en Google</a>
+                            <div style="margin-top: 5px;">
+                                <span style="display: inline-block; background: #6f42c1; color: white; padding: 3px 8px; 
+                                           border-radius: 10px; font-size: 12px;">Confianza: {dork_confidence:.2f}</span>
+                            </div>
+                        </div>
+                        """
+                        st.markdown(dork_card, unsafe_allow_html=True)
+
                 # Búsqueda de Dominio
                 elif source_type == 'domain' and isinstance(source_results, dict) and 'results' in source_results:
                     st.markdown(f"### 🌐 Historial de Dominio")
@@ -564,18 +602,10 @@ def show_person_search_ui():
             if st.button("🔗 Detectar Tipos", key="detect_types_btn"):
                 try:
                     st.info("🔎 Detectando tipos de relación...")
-                    # ✅ Solo si tienes al menos 2 personas
-                    if st.session_state.get('search_results') and len(
-                            st.session_state['search_results']['people']['results']) >= 2:
-                        # Extraer las primeras 2 personas
-                        people_list = st.session_state['search_results']['people']['results']
-                        person_a = people_list[0]
-                        person_b = people_list[1]
-
-                        suggested = suggest_relationships(person_a, person_b)
-                        if suggested:
-                            for rel_type, persons in suggested.items():
-                                st.info(f"💡 Sugerencia: {rel_type} entre {', '.join(p['name'] for p in persons)}")
+                    suggested = suggest_relationships(st.session_state['search_results'])
+                    if suggested:
+                        for rel_type, persons in suggested.items():
+                            st.info(f"💡 Sugerencia: {rel_type} entre {', '.join(p['name'] for p in persons)}")
                     else:
                         st.info("No se detectaron relaciones específicas.")
                 except Exception as e:

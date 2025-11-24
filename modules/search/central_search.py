@@ -12,6 +12,7 @@ from . import (
     socmint,
     darkweb,
     archive_search,
+    google_dorks
 )
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,9 @@ class SearchCoordinator:
             'email': emailint,
             'social': socmint,
             'darkweb': darkweb,
-            'archive': archive_search
+            'archive': archive_search,
+            # Nuevo proveedor de búsqueda: Google Dorks
+            'dorks': google_dorks
         }
 
     def search(self, query: str, sources: List[str] = None, **kwargs) -> Dict[str, Any]:
@@ -96,6 +99,21 @@ class SearchCoordinator:
                         # Búsqueda en arquitectura web (Wayback, Archive)
                         archive_options = kwargs.get('archive_options', {})
                         result = provider.search_web_archives(query, archive_options.get('sources', ['wayback', 'archive']))
+                        results[source_name] = result
+
+                    elif source_name == 'dorks':
+                        # Búsqueda mediante Google Dorks
+                        dorks_options = kwargs.get('dorks_options', {})
+                        patterns = dorks_options.get('patterns')
+                        # El módulo google_dorks expone "search_google_dorks"
+                        try:
+                            result = provider.search_google_dorks(query, patterns)
+                        except AttributeError:
+                            # Compatibilidad con wrappers "search_dorks" o "search"
+                            if hasattr(provider, 'search_dorks'):
+                                result = provider.search_dorks(query, patterns)
+                            else:
+                                result = provider.search(query, patterns=patterns)
                         results[source_name] = result
 
                     else:

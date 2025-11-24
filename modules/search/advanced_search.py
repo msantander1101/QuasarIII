@@ -339,9 +339,10 @@ class AdvancedSearcher:
     def _search_dorks(self, query: str) -> Dict[str, Any]:
         """Búsqueda de Google Dorks para el término dado.
 
-        Este método usa el módulo ``google_dorks`` para generar consultas dorks
-        combinando patrones avanzados de búsqueda con la consulta del usuario.
-        Devuelve un diccionario con la estructura estándar esperada por la UI.
+        Este método recupera, si existen, las claves API configuradas para SerpAPI
+        y Google Custom Search (CSE) mediante ``config_manager`` y las pasa al
+        módulo ``google_dorks``. Si no hay claves, se usa DuckDuckGo como
+        fallback.
 
         Args:
             query: El término a investigar.
@@ -350,7 +351,24 @@ class AdvancedSearcher:
             Diccionario con los resultados encontrados o un mensaje de error.
         """
         try:
-            dork_results = google_dorks.search_google_dorks(query)
+            # Obtener las claves API configuradas para el usuario
+            serpapi_key = None
+            google_api_key = None
+            google_cx = None
+            try:
+                user_id = st.session_state.get('current_user_id')
+                serpapi_key = config_manager.get_config(user_id, 'serpapi')
+                google_api_key = config_manager.get_config(user_id, 'google_api_key')
+                google_cx = config_manager.get_config(user_id, 'google_custom_search_cx')
+            except Exception:
+                pass
+
+            dork_results = google_dorks.search_google_dorks(
+                query,
+                serpapi_key=serpapi_key,
+                google_api_key=google_api_key,
+                google_cx=google_cx
+            )
             return {
                 "source": "dorks",
                 "query": query,

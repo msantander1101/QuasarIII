@@ -463,11 +463,28 @@ def show_person_search_ui():
                     dork_results = source_results['results']
                     total_count += len(dork_results)
                     for i, dork_item in enumerate(dork_results):
-                        # Cada elemento es un diccionario con la consulta y URL del dork
                         dork_query = dork_item.get('query', '')
                         dork_url = dork_item.get('url', '#')
                         dork_title = dork_item.get('title', 'Dork')
                         dork_confidence = dork_item.get('confidence', 0.0)
+                        # Subresultados web obtenidos (si existen)
+                        subresults = dork_item.get('results', []) if isinstance(dork_item, dict) else []
+                        # Construir HTML para mostrar subresultados
+                        subresults_html = ""
+                        if subresults:
+                            subresults_html += "<ul style='margin-top: 10px;'>"
+                            for sub in subresults:
+                                title = sub.get('title', 'Sin título')
+                                url_link = sub.get('url', '#')
+                                snippet = sub.get('snippet', '')
+                                confidence_sub = sub.get('confidence', 0.0)
+                                subresults_html += f"<li style='margin-bottom:8px;'>"
+                                subresults_html += f"<a href='{url_link}' target='_blank' style='color:#007bff; font-weight:600;'>{title}</a>"
+                                if snippet:
+                                    subresults_html += f"<br/><span style='font-size:13px; color:#555;'>{snippet}</span>"
+                                subresults_html += f"<br/><span style='font-size:11px; color:#6c757d;'>Confianza: {confidence_sub:.2f}</span>"
+                                subresults_html += "</li>"
+                            subresults_html += "</ul>"
                         dork_card = f"""
                         <div style="border: 1px solid #e9ecef; border-radius: 12px; padding: 15px; margin-bottom: 10px; 
                                    background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
@@ -480,6 +497,7 @@ def show_person_search_ui():
                                 <span style="display: inline-block; background: #6f42c1; color: white; padding: 3px 8px; 
                                            border-radius: 10px; font-size: 12px;">Confianza: {dork_confidence:.2f}</span>
                             </div>
+                            {subresults_html}
                         </div>
                         """
                         st.markdown(dork_card, unsafe_allow_html=True)

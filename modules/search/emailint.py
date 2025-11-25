@@ -4,7 +4,8 @@
 Búsqueda real de información de email con integración a APIs reales
 (HIBP + SkyMem + GHunt + verificación)
 """
-
+import io
+import sys
 import hashlib
 import logging
 import requests
@@ -13,7 +14,6 @@ import json
 import re
 import asyncio
 import subprocess
-import sys
 import os
 from typing import Dict, List, Any
 from core.config_manager import config_manager
@@ -144,10 +144,24 @@ class EmailSearcher:
             asyncio.set_event_loop(loop)
             result = loop.run_until_complete(ghunt_hunt(None, email))
             loop.close()
-            return {"success": True, "data": result, "source": "ghunt", "timestamp": time.time()}
+
+            # Validar que result tenga datos antes de acceder a listas
+            if not result or not isinstance(result, dict):
+                return {"success": False, "error": "GHunt retornó datos vacíos", "source": "ghunt"}
+
+            return {
+                "success": True,
+                "data": result,
+                "source": "ghunt",
+                "timestamp": time.time()
+            }
+        except IndexError as e:
+            # Este es el error “list index out of range”
+            logger.warning(f"GHunt: lista vacía para email {email} - {str(e)}")
+            return {"success": False, "error": "GHunt: lista vacía para este email", "source": "ghunt"}
         except Exception as e:
-            logger.error(f"GHunt interno falló al procesar {email}: {str(e)}")
-            return {"success": False, "error": "GHunt falló internamente", "source": "ghunt"}
+            logger.error(f"Error inesperado en GHunt: {e}")
+            return {"success": False, "error": f"Error GHunt: {str(e)}", "source": "ghunt"}
 
     # ============================================================
     #              HIBP — CHECK REAL

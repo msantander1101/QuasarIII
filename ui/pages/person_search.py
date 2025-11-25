@@ -1,5 +1,4 @@
 # ui/pages/person_search.py
-
 import streamlit as st
 from modules.search.advanced_search import advanced_searcher, search_multiple_sources, search_with_filtering
 from modules.search.relationship_search import suggest_relationships, find_connections
@@ -36,7 +35,7 @@ def show_person_search_ui():
         </div>
     """, unsafe_allow_html=True)
 
-    # Variables de estado para evitar problemas de sesión
+    # --- Variables de estado ---
     search_name = st.session_state.get("search_name", "")
     search_email = st.session_state.get("search_email", "")
     search_location = st.session_state.get("search_location", "")
@@ -48,10 +47,10 @@ def show_person_search_ui():
     search_date_start = st.session_state.get("date_start")
     search_date_end = st.session_state.get("date_end")
     search_sources = st.session_state.get("search_sources", ["people", "email", "social", "darkweb"])
-    search_relationship = st.session_state.get("search_relationship", "Todas")
     search_confidence = st.session_state.get("search_confidence", 0.7)
+    search_relationship = st.session_state.get("search_relationship", "Todas")
 
-    # Panel de búsqueda con múltiples criterios (inputs mejorados)
+    # --- Panel de Búsqueda ---
     st.markdown("### 🔍 Criterios de Búsqueda Avanzada")
 
     col1, col2, col3, col4 = st.columns(4)
@@ -76,7 +75,7 @@ def show_person_search_ui():
                                      placeholder="+1-555-0123",
                                      help="Número de teléfono")
 
-    # Filtros adicionales
+    # --- Filtros adicionales ---
     st.markdown("### 📜 Historial Histórico")
     col_hist = st.columns(2)
     with col_hist[0]:
@@ -90,7 +89,6 @@ def show_person_search_ui():
                                      help="Ruta de archivos específicos")
 
     st.markdown("### 🧩 Filtros Avanzados")
-
     col_filters = st.columns(3)
 
     with col_filters[0]:
@@ -105,25 +103,19 @@ def show_person_search_ui():
         search_date_end = st.date_input("📅 Hasta", value=None if not search_date_end else search_date_end,
                                         key="date_end")
 
-        # Selector de fuentes (con mejor UX y validación)
         search_sources = st.multiselect(
             "🌐 Fuentes",
             options=["all", "people", "email", "social", "domain", "web", "darkweb", "dorks"],
-            default=["all"],
+            default=search_sources if search_sources else ["all"],
             key="search_sources",
             help="Selecciona las fuentes a usar en la búsqueda"
         )
 
     with col_filters[2]:
-        # ✅ Corregido: No se pasa una lista, se pasa un entero
         relationship_options = ["Todas", "Colaborador", "Familiar", "Amigo", "Contacto"]
-        default_index = 0
+        default_index = relationship_options.index(search_relationship) if search_relationship in relationship_options else 0
 
-        # Buscar índice según valor actual (seguro)
-        current_value = st.session_state.get("search_relationship", "Todas")
-        if current_value in relationship_options:
-            default_index = relationship_options.index(current_value)
-
+        # Selectbox seguro con session_state
         search_relationship = st.selectbox(
             "🔍 Tipo Relación",
             options=relationship_options,
@@ -131,25 +123,24 @@ def show_person_search_ui():
             key="search_relationship"
         )
 
-        search_confidence = st.slider("🎯 Confianza Mínima", 0.0, 1.0, 0.7, step=0.1,
+        search_confidence = st.slider("🎯 Confianza Mínima", 0.0, 1.0, search_confidence, step=0.1,
                                       key="search_confidence",
                                       help="Mínimo nivel de confianza para mostrar resultados")
 
     # --- Acciones de búsqueda ---
     st.markdown("### ⚙️ Acciones de Búsqueda")
-
     col_actions = st.columns(5)
 
+    # Buscar Personas
     with col_actions[0]:
         if st.button("🔍 Buscar Personas", use_container_width=True, key="btn_search",
                      help="Buscar personas con criterios"):
-            # Validar al menos un campo no vacío
+
             query_input = search_name or search_email or search_location or search_phone or search_domain
             if not query_input:
                 st.warning("⚠️ Por favor, introduce al menos un criterio de búsqueda.")
                 return
 
-            # Construir datos de búsqueda
             criteria = {
                 "query": query_input,
                 "name": search_name,
@@ -168,97 +159,87 @@ def show_person_search_ui():
 
             try:
                 with st.spinner("🔍 Realizando búsqueda avanzada con múltiples fuentes..."):
-                    # Determinar fuentes reales a usar
-                    # Si el usuario elige "all", incluir todas las fuentes disponibles, incluido dorks
-                    if "all" in search_sources:
-                        # Enumerar todas las fuentes soportadas por el buscador avanzado.  Se incluye
-                        # la opción "dorks" para aprovechar las búsquedas Google Dorks
-                        selected_sources = [
-                            "people",
-                            "email",
-                            "social",
-                            "domain",
-                            "web",
-                            "darkweb",
-                            "dorks",
-                        ]
-                    else:
-                        selected_sources = search_sources
+                    selected_sources = search_sources
+                    if "all" in selected_sources:
+                        selected_sources = ["people", "email", "social", "domain", "web", "darkweb", "dorks"]
 
-                    # Si no hay fuentes seleccionadas, usar por defecto
                     if not selected_sources:
                         selected_sources = ["people", "email", "social", "domain", "darkweb"]
 
-                    # Añadir dominio si hay búsqueda por dominio o archivo
                     if search_domain or search_files:
                         if "domain" not in selected_sources:
                             selected_sources.append("domain")
 
-                    # Si se selecciona darkweb, hacer búsqueda real
+                    # Dark web
+                    darkweb_result = None
                     if "darkweb" in selected_sources:
-                        darkweb_result = search_dark_web_catalog(
-                            criteria["query"],
-                            search_type="catalog",
-                            max_results=50
-                        )
+                        darkweb_result = search_dark_web_catalog(criteria["query"], search_type="catalog", max_results=50)
                         st.session_state['darkweb_results'] = darkweb_result
 
-                    # Ejecutar búsqueda múltiple
                     search_results = search_multiple_sources(criteria["query"], selected_sources)
 
-                    # Añadir historial si hay dominio
+                    # Emails
+                    email_results = []
+                    people_results = search_results.get('people', {}).get('results', [])
+                    for person in people_results:
+                        if isinstance(person, dict):  # ← solo procesar diccionarios
+                            email = person.get('email')
+                            if email and '@' in email:
+                                try:
+                                    from modules.search.emailint import check_email_breach
+                                    breach_data = check_email_breach(email, st.session_state.get('current_user_id', 1))
+                                    if isinstance(breach_data, dict):
+                                        email_results.append(breach_data)
+                                except Exception as e:
+                                    logger.warning(f"Error verificando brecha de email para {email}: {e}")
+
+                    if email_results:
+                        if 'email' not in search_results or not isinstance(search_results['email'], dict):
+                            search_results['email'] = {'results': []}
+                        search_results['email']['results'].extend(email_results)
+
+                    # Archivos/Dominio
                     if search_domain:
                         archive_results = archive_search.search_web_archives(search_domain, ["wayback", "archive"])
                         search_results["archive_history"] = archive_results
 
-                    # Guardar en sesión
                     st.session_state['search_results'] = search_results
                     st.session_state['search_criteria'] = criteria
                     st.session_state['search_timestamp'] = time.time()
 
                 st.success(f"✅ Búsqueda completada con {len(selected_sources)} fuentes")
-
             except Exception as e:
                 st.error(f"❌ Error en la búsqueda: {str(e)}")
                 logger.error(f"Error en búsqueda avanzada: {e}", exc_info=True)
 
+    # --- Botones adicionales ---
     with col_actions[1]:
-        if st.button("🔄 Limpiar", use_container_width=True, key="btn_clear", help="Limpiar todos los campos"):
-            # Eliminar campos de búsqueda de sesión
+        if st.button("🔄 Limpiar", use_container_width=True):
             for key in [
                 "search_name", "search_email", "search_location", "search_phone",
                 "search_domain", "search_files", "search_company", "search_role",
                 "date_start", "date_end", "search_sources", "search_relationship", "search_confidence"
             ]:
-                st.session_state[key] = ""
+                st.session_state[key] = "" if key != "search_confidence" else 0.7
             st.session_state['search_results'] = None
             st.session_state['darkweb_results'] = None
             st.rerun()
 
     with col_actions[2]:
-        if st.button("🧩 Analizar Relaciones", use_container_width=True, key="btn_analyze",
-                     help="Analizar posibles relaciones"):
+        if st.button("🧩 Analizar Relaciones", use_container_width=True):
             if st.session_state.get('search_results') is None:
                 st.warning("⚠️ Primero busca personas antes de analizar relaciones")
                 return
-
-            st.info("🔍 Analizando relaciones entre las personas encontradas...")
             st.session_state['page'] = 'relationship_analysis'
             st.session_state['force_reload'] = True
             st.rerun()
 
     with col_actions[3]:
-        if st.button("📊 Exportar Resultados", use_container_width=True, key="btn_export",
-                     help="Exportar resultados a archivo"):
+        if st.button("📊 Exportar Resultados", use_container_width=True):
             if st.session_state.get('search_results') is None:
                 st.warning("⚠️ No hay resultados para exportar")
                 return
-
-            results = st.session_state['search_results']
-            total_count = sum(
-                len(r.get('results', [])) for r in results.values() if isinstance(r, dict) and 'results' in r)
-
-            st.info(f"📥 Exportando {total_count} resultados a archivo... (en desarrollo)")
+            st.info("📥 Exportando resultados a archivo... (en desarrollo)")
             # Aquí se implementaría la exportación (CSV, JSON, etc.)
 
     # Mostrar resultados si existen

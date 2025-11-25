@@ -1,13 +1,12 @@
 # ui/pages/person_search.py
 
 import streamlit as st
-from modules.search.advanced_search import search_multiple_sources, search_with_filtering
+from modules.search.advanced_search import advanced_searcher, search_multiple_sources, search_with_filtering
 from modules.search.relationship_search import suggest_relationships, find_connections
 from modules.search.emailint import check_email_breach
 from modules.search import archive_search
 from modules.search.darkweb import search_dark_web_catalog, get_available_onion_search_engines, \
     check_onion_connectivity, get_darkweb_stats
-
 from modules.search.pastesearch import search_paste_sites, search_leaks
 from core.db_manager import create_person, get_persons_by_user
 import json

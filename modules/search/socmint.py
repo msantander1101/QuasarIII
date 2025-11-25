@@ -1,21 +1,12 @@
-# modules/search/socmint.py
-"""
-Módulo de SOCMINT con integración completa a APIs reales
-"""
-
 import logging
 import requests
 import time
-import json
 from typing import Dict, List, Any
-from urllib.parse import quote_plus
-import asyncio
-import aiohttp
-from concurrent.futures import ThreadPoolExecutor
-from core.config_manager import config_manager
+import subprocess
+import tempfile
+import json
 
 logger = logging.getLogger(__name__)
-
 
 class SocmintSearcher:
     """
@@ -32,24 +23,7 @@ class SocmintSearcher:
         self.timeout = 30
 
     def search_social_profiles(self, username: str, platforms: List[str] | None = None) -> Dict[str, Any]:
-        """
-        Busca perfiles sociales para un nombre de usuario utilizando las herramientas
-        externas Maigret y Sherlock. Para evitar dependencias circulares y
-        desacoplar este módulo de la implementación interna de ``people_search``,
-        se crea una instancia de ``PeopleSearcher`` localmente y se invoca su
-        método ``search_social_profiles``. A partir de la salida de esas
-        herramientas, este método construye una lista de perfiles y recopila
-        posibles errores.
-
-        Args:
-            username: El nombre de usuario o identificador a consultar.
-            platforms: Lista opcional de plataformas para filtrar los resultados.
-
-        Returns:
-            Un diccionario con los perfiles encontrados y metadatos asociados.
-        """
         from .people_search import PeopleSearcher
-        # Instanciar un buscador independiente para esta consulta
         try:
             searcher = PeopleSearcher()
             tool_results = searcher.search_social_profiles(username, platforms)
@@ -67,17 +41,12 @@ class SocmintSearcher:
         profiles_found: List[Dict[str, Any]] = []
         errors: List[str] = []
 
-        # tool_results es un diccionario con claves 'maigret' y 'sherlock'
         if isinstance(tool_results, dict):
             for tool_name, data in tool_results.items():
-                if not data:
-                    continue
-                # Manejar errores o advertencias
                 if isinstance(data, dict) and (data.get('error') or data.get('warning')):
                     msg = data.get('error') or data.get('warning')
                     errors.append(f"{tool_name}: {msg}")
                     continue
-                # Salida sin formato (no JSON)
                 if isinstance(data, dict) and data.get('raw_output'):
                     profiles_found.append({
                         'platform': tool_name,
@@ -90,14 +59,12 @@ class SocmintSearcher:
                         'raw_output': data.get('raw_output')
                     })
                     continue
-                # Data con formatos por sitio
                 if isinstance(data, dict):
                     for site, details in data.items():
                         try:
                             if not isinstance(details, dict):
                                 errors.append(f"{tool_name}-{site}: formato no soportado")
                                 continue
-                            # Determinar existencia
                             status = details.get('status') or details.get('state') or details.get('exists')
                             exists = False
                             if isinstance(status, str):
@@ -108,7 +75,6 @@ class SocmintSearcher:
                                 exists = True
                             if not exists:
                                 continue
-                            # Construir perfil
                             profile = {
                                 'platform': site,
                                 'username': username,
@@ -118,7 +84,6 @@ class SocmintSearcher:
                                 'url': details.get('url') or details.get('url_main'),
                                 'source': tool_name
                             }
-                            # Filtrar por plataformas solicitadas
                             if platforms and site.lower() not in [p.lower() for p in platforms]:
                                 continue
                             profiles_found.append(profile)
@@ -136,423 +101,38 @@ class SocmintSearcher:
             "errors": errors
         }
 
-    def _fetch_social_profile(self, username: str, platform: str) -> List[Dict]:
-        """
-        Búsqueda real de perfil en plataforma específica
-        """
-        try:
-            logger.debug(f"Búsqueda real en {platform}: {username}")
-
-            # Dependiendo del tipo de plataforma, conectamos a la API real correspondiente
-            if platform.lower() == 'instagram':
-                return self._fetch_instagram_real(username)
-            elif platform.lower() == 'tiktok':
-                return self._fetch_tiktok_real(username)
-            elif platform.lower() == 'youtube':
-                return self._fetch_youtube_real(username)
-            elif platform.lower() == 'twitter':
-                return self._fetch_twitter_real(username)
-            elif platform.lower() == 'linkedin':
-                return self._fetch_linkedin_real(username)
-            elif platform.lower() == 'facebook':
-                return self._fetch_facebook_real(username)
-            elif platform.lower() == 'reddit':
-                return self._fetch_reddit_real(username)
-            else:
-                # Si no hay integración específica, buscar de forma genérica
-                return self._fetch_generic_profile(username, platform)
-
-        except Exception as e:
-            logger.error(f"Error fetching {platform}: {e}")
-            return []
-
-    def _fetch_instagram_real(self, username: str) -> List[Dict]:
-        """
-        Búsqueda real en Instagram con API real
-        """
-        try:
-            # NOTA: En producción, aquí iría conexión real con:
-            # - Instagram Basic Display API
-            # - Requiere app registrada en developers.facebook.com
-            # - Token de acceso válido
-
-            # Ejemplo estructura real de respuesta (simulación para estructura correcta)
-            return [{
-                "platform": "instagram",
-                "username": username,
-                "display_name": f"{username}_official",
-                "profile_url": f"https://instagram.com/{username}",
-                "followers": 124567,
-                "following": 892,
-                "posts": 456,
-                "verified": True,
-                "bio": "Profesional en tecnología y desarrollo",
-                "profile_image": f"https://example.com/{username}_profile.jpg",
-                "timestamp": time.time(),
-                "confidence": 0.95,
-                "source": "Instagram API",
-                "location": "Madrid, España",
-                "email": f"{username}@example.com",
-                "website": "www.example.com"
-            }]
-
-        except Exception as e:
-            logger.error(f"Error al buscar Instagram: {e}")
-            return []
-
-    def _fetch_tiktok_real(self, username: str) -> List[Dict]:
-        """
-        Búsqueda real en TikTok con API real
-        """
-        try:
-            # NOTA: Conexión real con TikTok Open API
-            # Requiere app registrada en tiktok.com/developers
-            # Token de acceso válido
-
-            return [{
-                "platform": "tiktok",
-                "username": username,
-                "display_name": f"{username}_creator",
-                "profile_url": f"https://tiktok.com/@{username}",
-                "followers": 872456,
-                "following": 1200,
-                "videos": 1245,
-                "likes": 1500000,
-                "verified": True,
-                "bio": "Creador de contenido divertido y educativo",
-                "profile_image": f"https://example.com/{username}_tiktok.jpg",
-                "timestamp": time.time(),
-                "confidence": 0.92,
-                "source": "TikTok API",
-                "location": "Barcelona, España"
-            }]
-
-        except Exception as e:
-            logger.error(f"Error al buscar TikTok: {e}")
-            return []
-
-    def _fetch_youtube_real(self, username: str) -> List[Dict]:
-        """
-        Búsqueda real en YouTube con API real
-        """
-        try:
-            # NOTA: Conexión real con YouTube Data API v3
-            # Requiere proyecto en Google Cloud Console
-            # API Key válida
-
-            return [{
-                "platform": "youtube",
-                "username": username,
-                "channel_name": f"{username} Channel",
-                "profile_url": f"https://youtube.com/@{username}",
-                "subscribers": 124567,
-                "videos": 2435,
-                "views": 45000000,
-                "verified": True,
-                "description": "Canal de educación tecnológica",
-                "profile_image": f"https://example.com/{username}_youtube.jpg",
-                "timestamp": time.time(),
-                "confidence": 0.98,
-                "source": "YouTube Data API",
-                "location": "Valencia, España",
-                "created_at": "2018-05-15"
-            }]
-
-        except Exception as e:
-            logger.error(f"Error al buscar YouTube: {e}")
-            return []
-
-    def _fetch_twitter_real(self, username: str) -> List[Dict]:
-        """
-        Búsqueda real en Twitter/X con API real
-        """
-        try:
-            # NOTA: Conexión real con Twitter API v2
-            # Requiere app desarrollador en twitter.com/developer
-            # API keys válidas
-
-            return [{
-                "platform": "twitter",
-                "username": username,
-                "display_name": f"{username}_professional",
-                "profile_url": f"https://twitter.com/{username}",
-                "followers": 876543,
-                "following": 2345,
-                "tweets": 14321,
-                "verified": True,
-                "bio": "Desarrollador senior en tecnología",
-                "profile_image": f"https://example.com/{username}_twitter.jpg",
-                "timestamp": time.time(),
-                "confidence": 0.96,
-                "source": "Twitter API v2",
-                "location": "Madrid, España",
-                "created_at": "2014-02-15"
-            }]
-
-        except Exception as e:
-            logger.error(f"Error al buscar Twitter: {e}")
-            return []
-
-    def _fetch_linkedin_real(self, username: str) -> List[Dict]:
-        """
-        Búsqueda real en LinkedIn con API real
-        """
-        try:
-            # NOTA: Conexión real con LinkedIn Marketing Developer Platform
-            # Requiere acceso a LinkedIn API
-            # Token de acceso válido
-
-            return [{
-                "platform": "linkedin",
-                "username": username,
-                "full_name": f"Mr. {username} Professional",
-                "profile_url": f"https://linkedin.com/in/{username}",
-                "connections": 75234,
-                "current_position": "Senior Developer",
-                "company": "TechCorp Inc.",
-                "location": "Madrid, España",
-                "summary": "Experto en desarrollo con 10+ años de experiencia",
-                "profile_image": f"https://example.com/{username}_linkedin.jpg",
-                "timestamp": time.time(),
-                "confidence": 0.97,
-                "source": "LinkedIn API",
-                "education": "Universidad Tecnológica",
-                "skills": ["Python", "JavaScript", "Machine Learning"]
-            }]
-
-        except Exception as e:
-            logger.error(f"Error al buscar LinkedIn: {e}")
-            return []
-
-    def _fetch_facebook_real(self, username: str) -> List[Dict]:
-        """
-        Búsqueda real en Facebook (si se tiene acceso)
-        """
-        try:
-            # NOTA: Conexión real con Graph API de Facebook
-            # Requiere aplicación registrada
-            # Token de acceso con permisos
-
-            return [{
-                "platform": "facebook",
-                "username": username,
-                "full_name": f"{username} Profile",
-                "profile_url": f"https://facebook.com/{username}",
-                "friends": 5423,
-                "posts": 1234,
-                "verified": True,
-                "bio": "Miembro de comunidad de tecnología",
-                "profile_image": f"https://example.com/{username}_facebook.jpg",
-                "timestamp": time.time(),
-                "confidence": 0.85,
-                "source": "Facebook Graph API",
-                "location": "Barcelona, España",
-                "birth_date": "1995-06-15"
-            }]
-
-        except Exception as e:
-            logger.error(f"Error al buscar Facebook: {e}")
-            return []
-
-    def _fetch_reddit_real(self, username: str) -> List[Dict]:
-        """
-        Búsqueda real en Reddit API
-        """
-        try:
-            # Conexión real con Reddit API v2 (sin autenticación)
-            # o con OAuth para datos completos
-
-            return [{
-                "platform": "reddit",
-                "username": username,
-                "display_name": f"u/{username}",
-                "profile_url": f"https://reddit.com/u/{username}",
-                "karma": 120423,
-                "comment_karma": 65432,
-                "post_karma": 54991,
-                "verified": False,
-                "bio": "Redditor desde 2015 interesado en tecnología",
-                "profile_image": f"https://example.com/{username}_reddit.jpg",
-                "timestamp": time.time(),
-                "confidence": 0.85,
-                "source": "Reddit API",
-                "location": "Valencia, España"
-            }]
-
-        except Exception as e:
-            logger.error(f"Error al buscar Reddit: {e}")
-            return []
-
-    def _fetch_generic_profile(self, username: str, platform: str) -> List[Dict]:
-        """
-        Búsqueda genérica para plataformas no implementadas específicamente
-        """
-        return [{
-            "platform": platform,
-            "username": username,
-            "display_name": f"{username} - {platform.capitalize()}",
-            "profile_url": f"https://{platform}.com/{username}",
-            "timestamp": time.time(),
-            "confidence": 0.5,
-            "source": "Búsqueda Genérica",
-            "description": "Perfil encontrado mediante búsqueda general"
-        }]
-
-    def analyze_social_profile(self, username: str, platform: str = "all") -> Dict[str, Any]:
-        """
-        Análisis profundo de perfil social con datos reales
-        """
-        try:
-            # Primero obtener los datos reales del perfil
-            search_results = self.search_social_profiles(username, [platform] if platform != "all" else None)
-
-            # Analizar datos reales
-            analysis = {
-                "query": username,
-                "platform": platform,
-                "timestamp": time.time(),
-                "analysis_summary": {},
-                "behavior_patterns": {},
-                "risk_assessment": {},
-                "interests": []
-            }
-
-            profiles = search_results.get("profiles_found", [])
-
-            if profiles:
-                # Estadísticas reales del perfil
-                analysis["analysis_summary"] = {
-                    "total_profiles": len(profiles),
-                    "platforms_found": list(set([p.get("platform", "unknown") for p in profiles])),
-                    "avg_confidence": round(sum([p.get("confidence", 0.5) for p in profiles]) / len(profiles),
-                                            2) if profiles else 0.5
-                }
-
-                # Intereses reales basados en datos reales
-                interests = []
-                for prof in profiles:
-                    bio = prof.get("bio", "") or ""
-                    if bio:
-                        # Si hay palabras clave en la biografía, las agregamos
-                        bio_words = bio.lower().split()
-                        interests.extend(bio_words)
-
-                analysis["interests"] = list(set(interests))[:10]
-
-                # Evaluación de riesgo real
-                verification_count = sum(1 for p in profiles if p.get("verified", False))
-                high_followers = sum(1 for p in profiles if p.get("followers", 0) > 10000)
-                data_exposure = any(p.get("email", None) for p in profiles)
-
-                analysis["risk_assessment"] = {
-                    "profile_security": "high" if verification_count > 0 else "medium",
-                    "data_exposure": "high" if data_exposure else "low",
-                    "data_consistency": "high" if len(profiles) > 1 else "low"
-                }
-
-            return analysis
-
-        except Exception as e:
-            logger.error(f"Error en análisis profundo: {e}")
-            return {"error": f"Error de análisis: {str(e)}"}
-
-    def get_social_network_graph(self, usernames: List[str]) -> Dict[str, Any]:
-        """
-        Generar grafo de redes sociales con datos reales (ejemplo estructurado)
-        """
-        try:
-            network_data = {
-                "nodes": [],
-                "edges": [],
-                "timestamp": time.time(),
-                "source": "SOCMINT Network Graph"
-            }
-
-            # Nodo por usuario
-            for username in usernames:
-                network_data["nodes"].append({
-                    "id": username,
-                    "label": username,
-                    "type": "user"
-                })
-
-            # Ejemplo de conexiones con datos reales
-            for i, username1 in enumerate(usernames):
-                for j, username2 in enumerate(usernames):
-                    if i != j and username1 != username2:  # Conexión con usuario distinto
-                        network_data["edges"].append({
-                            "source": username1,
-                            "target": username2,
-                            "relationship": "connected",
-                            "strength": 0.75,  # Simulación de conexión real
-                            "timestamp": time.time()
-                        })
-
-            return network_data
-
-        except Exception as e:
-            logger.error(f"Error en grafo social: {e}")
-            return {"error": f"Error del grafo: {str(e)}"}
-
-    def get_supported_platforms(self) -> List[str]:
-        """
-        Devuelve lista de plataformas que se pueden integrar con APIs reales
-        """
-        return ['instagram', 'tiktok', 'youtube', 'twitter', 'linkedin', 'facebook', 'reddit']
-
-
 # Instancia global
 socmint_searcher = SocmintSearcher()
 
-
 # Funciones públicas para exportar
 def search_social_profiles(username: str, platforms: List[str] = None) -> Dict[str, Any]:
-    """Búsqueda real de perfíles sociales en múltiples plataformas"""
     return socmint_searcher.search_social_profiles(username, platforms)
 
-
 def analyze_social_profile(username: str, platform: str = "all") -> Dict[str, Any]:
-    """Análisis profundo de perfil con datos reales"""
     return socmint_searcher.analyze_social_profile(username, platform)
 
-
 def get_social_network_graph(usernames: List[str]) -> Dict[str, Any]:
-    """Generar grafo social con datos reales"""
     return socmint_searcher.get_social_network_graph(usernames)
 
-
 def get_supported_platforms() -> List[str]:
-    """Obtener plataformas compatibles"""
     return socmint_searcher.get_supported_platforms()
 
+def run_maigret(username):
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmpfile:
+        cmd = ["maigret", username, "-J", "simple", "--json", tmpfile.name]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            return {"error": result.stderr}
+        with open(tmpfile.name) as f:
+            data = json.load(f)
+        return data
 
-# Función adicional para buscar múltiples usuarios en plataformas sociales
-def search_multiple_social_profiles(usernames: List[str], platforms: List[str] = None, api_configs: Dict[str, Any] = None) -> Dict[str, Any]:
-    """
-    Realiza una búsqueda de perfiles sociales para múltiples nombres de usuario
-    utilizando el buscador SOCMINT. Combina los resultados en una lista.
-
-    Args:
-        usernames: Lista de usernames o identificadores a buscar.
-        platforms: Lista de plataformas específicas (opcional). Si se omite, se
-                   utilizarán todas las plataformas soportadas.
-        api_configs: Configuraciones específicas de API (no se usan en la versión simulada).
-
-    Returns:
-        Diccionario con los perfiles encontrados y metadatos.
-    """
-    aggregated_results: List[Dict[str, Any]] = []
-    total_profiles = 0
-    for uname in usernames:
-        # Ejecutar búsqueda de perfiles para cada usuario
-        profile_data = socmint_searcher.search_social_profiles(uname, platforms)
-        aggregated_results.append(profile_data)
-        total_profiles += profile_data.get('total_profiles', 0)
-
-    return {
-        "query": usernames,
-        "platforms_searched": platforms or socmint_searcher.get_supported_platforms(),
-        "results": aggregated_results,
-        "total_profiles": total_profiles,
-        "timestamp": time.time()
-    }
+def run_sherlock(username):
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmpfile:
+        cmd = ["sherlock", username, "--json", tmpfile.name]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            return {"error": result.stderr}
+        with open(tmpfile.name) as f:
+            data = json.load(f)
+        return data

@@ -95,52 +95,74 @@ def search_paste_sites(query: str, pastebin_api_key: str = None) -> List[Dict[st
             logger.warning("Clave HIBP no configurada para este usuario. No se puede buscar en breaches.")
 
         # 2. Buscar en GitHub Gist (siempre, sin filtro de email)
-        if len(query) > 2:
+        # Solo buscar si query es suficientemente largo
+        if len(query.strip()) > 3:
             gists = search_gist_by_keyword(query)
             if gists:
                 for gist in gists:
-                    results.append({
-                        "title": gist.get("description", gist.get("files", {}).get("raw", "Sin título")),
-                        "url": gist.get("html_url"),
-                        "date": gist.get("created_at"),
-                        "size": f"{gist.get('files', {}).get('size', 0)} KB",
-                        "language": gist.get("files", {}).get("raw", {}).get("language", "Text"),
-                        "source": "GitHub Gist",
-                        "type": "gist",
-                        "tags": ["code", "paste", "leak"]
-                    })
+                    # Ajustar estructura para manejar posibles tipos de datos
+                    if isinstance(gist, dict):
+                        results.append({
+                            "title": gist.get("description", gist.get("files", {}).get("raw", "Sin título")),
+                            "url": gist.get("html_url"),
+                            "date": gist.get("created_at"),
+                            "size": f"{gist.get('files', {}).get('size', 0)} KB",
+                            "language": gist.get("files", {}).get("raw", {}).get("language", "Text"),
+                            "source": "GitHub Gist",
+                            "type": "gist",
+                            "tags": ["code", "paste", "leak"]
+                        })
+                    elif isinstance(gist, list):
+                        for item in gist:
+                            if isinstance(item, dict):
+                                results.append({
+                                    "title": item.get("description", item.get("files", {}).get("raw", "Sin título")),
+                                    "url": item.get("html_url"),
+                                    "date": item.get("created_at"),
+                                    "size": f"{item.get('files', {}).get('size', 0)} KB",
+                                    "language": item.get("files", {}).get("raw", {}).get("language", "Text"),
+                                    "source": "GitHub Gist",
+                                    "type": "gist",
+                                    "tags": ["code", "paste", "leak"]
+                                })
 
-        # 3. Buscar en Leakatlas.com (siempre, sin filtro de email)
-        if query.lower() in ["password", "email", "api_key"]:
-            leakatlas_results = search_leakatlas(query)
-            if leakatlas_results:
-                for item in leakatlas_results:
-                    results.append({
-                        "title": item.get("title", "Sin título"),
-                        "url": item.get("url"),
-                        "date": item.get("date"),
-                        "size": item.get("size", "Desconocido"),
-                        "language": item.get("language", "Other"),
-                        "source": "Leakatlas.com",
-                        "type": "leak",
-                        "tags": ["data leak", "breach"]
-                    })
+        # 3. Buscar en Leakatlas.com (siempre, sin filtro de email) - Manejo de errores
+        if len(query.strip()) > 3:
+            try:
+                leakatlas_results = search_leakatlas(query)
+                if leakatlas_results:
+                    for item in leakatlas_results:
+                        results.append({
+                            "title": item.get("title", "Sin título"),
+                            "url": item.get("url"),
+                            "date": item.get("date"),
+                            "size": item.get("size", "Desconocido"),
+                            "language": item.get("language", "Other"),
+                            "source": "Leakatlas.com",
+                            "type": "leak",
+                            "tags": ["data leak", "breach"]
+                        })
+            except Exception as e:
+                logger.warning(f"Error buscando en Leakatlas: {e}")
 
         # 4. Buscar en Google Site Search (siempre, sin filtro de email)
-        if query.lower() in ["password", "email", "api_key"]:
-            google_results = search_google_site(query)
-            if google_results:
-                for item in google_results:
-                    results.append({
-                        "title": item.get("title"),
-                        "url": item.get("url"),
-                        "date": item.get("date"),
-                        "size": "N/A",
-                        "language": item.get("language", "Unknown"),
-                        "source": "Google Site Search",
-                        "type": "web",
-                        "tags": ["public paste"]
-                    })
+        if len(query.strip()) > 3:
+            try:
+                google_results = search_google_site(query)
+                if google_results:
+                    for item in google_results:
+                        results.append({
+                            "title": item.get("title"),
+                            "url": item.get("url"),
+                            "date": item.get("date"),
+                            "size": "N/A",
+                            "language": item.get("language", "Unknown"),
+                            "source": "Google Site Search",
+                            "type": "web",
+                            "tags": ["public paste"]
+                        })
+            except Exception as e:
+                logger.warning(f"Error buscando en Google Site Search: {e}")
 
         # 5. Buscar en leaks específicos (siempre)
         leak_results = search_leaks(query, user_id=user_id)
@@ -171,10 +193,19 @@ def search_gist_by_keyword(query: str) -> List[Dict[str, Any]]:
 
         response = requests.get(GITHUB_GIST_URL, headers=headers, params=params, timeout=10)
         if response.status_code == 200:
-            data = response.json()
-            if data.get("data"):
-                return data["data"][:5]  # Solo 5 resultados
-            else:
+            try:
+                data = response.json()
+                # Corrección: verificar estructura del resultado
+                if isinstance(data, dict) and "data" in data:
+                    return data["data"][:5]  # Solo 5 resultados
+                elif isinstance(data, list):
+                    return data[:5]  # Si ya es una lista
+                else:
+                    logger.warning("Estructura inesperada de resultados de GitHub Gist")
+                    return []
+            except Exception:
+                # Si hay error al parsear JSON, retornar vacío
+                logger.warning("Error parseando resultados de GitHub Gist")
                 return []
         else:
             logger.warning(f"GitHub request failed: {response.status_code}")
@@ -197,18 +228,22 @@ def search_leakatlas(query: str) -> List[Dict[str, Any]]:
         response = requests.get(search_url, headers=headers, timeout=10)
 
         if response.status_code == 200:
-            data = response.json()
-            if data.get("results"):
-                return [
-                    {
-                        "title": r.get("title"),
-                        "url": r.get("url"),
-                        "date": r.get("date"),
-                        "size": r.get("size", "Desconocido"),
-                        "language": r.get("language", "Unknown")
-                    }
-                    for r in data["results"][:5]
-                ]
+            try:
+                data = response.json()
+                if data.get("results"):
+                    return [
+                        {
+                            "title": r.get("title"),
+                            "url": r.get("url"),
+                            "date": r.get("date"),
+                            "size": r.get("size", "Desconocido"),
+                            "language": r.get("language", "Unknown")
+                        }
+                        for r in data["results"][:5]
+                    ]
+            except Exception:
+                logger.warning("Error parseando resultados de Leakatlas")
+                return []
         else:
             logger.warning(f"Leakatlas error: {response.status_code}")
             return []
@@ -229,11 +264,12 @@ def search_google_site(query: str) -> List[Dict[str, Any]]:
         response = requests.get(search_url, headers=headers, timeout=10)
 
         if response.status_code == 200:
-            # Simulación: solo devuelve un resultado
+            # Por simplicidad, retornamos solo un resultado simulado
+            # La implementación real requiere scraping de HTML
             return [
                 {
-                    "title": "Pastebin: " + query,
-                    "url": "https://pastebin.com/search?query=" + query,
+                    "title": f"Pastebin: {query}",
+                    "url": f"https://pastebin.com/search?query={query}",
                     "date": "Desconocido",
                     "language": "HTML",
                     "source": "Google Site Search"

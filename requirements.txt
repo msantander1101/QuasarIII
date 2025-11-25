@@ -1,3 +1,4 @@
+ghunt
 beautifulsoup4
 pillow
 langchain-openai

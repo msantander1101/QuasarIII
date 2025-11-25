@@ -735,6 +735,9 @@ def show_person_search_ui():
                                         <strong>Confianza:</strong> {breach_result.get('confidence', 0.0):.2f}
                                     </p>
                                     {f'<p style="color: #b0b0c0; font-size: 14px;"><strong>Mensaje:</strong> {breach_result.get("message", "N/A")}</p>' if breach_result.get("message") else ""}
+                                    <p style="color: #b0b0c0; font-size: 14px;">
+                                        <strong>Resultados adicionales:</strong> {len(breach_result.get('details', [])) if breach_result.get('details') else 0} fuentes
+                                    </p>
                                 </div>
                                 """, unsafe_allow_html=True)
                             else:
@@ -742,33 +745,52 @@ def show_person_search_ui():
                         else:
                             st.warning("⚠️ No se pudo obtener información de brechas")
 
-                    # Mostrar resultados de GHunt
+                    # Mostrar resultados de GHunt con manejo de errores específicos
+
                     if "ghunt" in email_info_result:
                         ghunt_result = email_info_result["ghunt"]
                         if isinstance(ghunt_result, dict):
+                            # Manejar casos especiales
                             if ghunt_result.get("success"):
                                 st.markdown("### 🕵️ Resultados de GHunt")
                                 st.markdown(f"""
-                                <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; 
-                                           padding: 15px; color: #e6e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
-                                    <h5 style="margin: 0; color: #ffffff;">Reporte de GHunt</h5>
-                                    <p style="color: #b0b0c0; font-size: 14px;">
-                                        <strong>Fuente:</strong> {ghunt_result.get('source', 'N/A')}<br/>
-                                        <strong>Estado:</strong> {'Exitoso' if ghunt_result.get('success') else 'Fallido'}<br/>
-                                        <strong>Tiempo:</strong> {ghunt_result.get('timestamp', 'N/A')}
-                                    </p>
-                                    {f'<p style="color: #b0b0c0; font-size: 14px;"><strong>Error:</strong> {ghunt_result.get("error", "N/A")}</p>' if ghunt_result.get("error") else ""}
-                                    {f'<p style="color: #b0b0c0; font-size: 14px;">✅ GHunt obtuvo resultados</p>' if ghunt_result.get("success") and ghunt_result.get("data") else ''}
-                                </div>
-                                """, unsafe_allow_html=True)
-                            elif ghunt_result.get('error'):
-                                # Mostrar error de GHunt si hay
-                                st.warning(f"⚠️ Error en GHunt: {ghunt_result.get('error')}")
-                            elif ghunt_result.get('message'):
-                                # Mostrar mensaje si GHunt no está disponible
-                                st.info(f"ℹ️ {ghunt_result.get('message')}")
+                                            <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                                       padding: 15px; color: #e6e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                                                <h5 style="margin: 0; color: #ffffff;">Reporte de GHunt</h5>
+                                                <p style="color: #b0b0c0; font-size: 14px;">
+                                                    <strong>Fuente:</strong> {ghunt_result.get('source', 'N/A')}<br/>
+                                                    <strong>Estado:</strong> {'✅ Exitoso' if ghunt_result.get('success') else '❌ Fallido'}<br/>
+                                                </p>
+                                                {f'<p style="color: #b0b0c0; font-size: 14px;"><strong>Error:</strong> {ghunt_result.get("error", "N/A")}</p>' if ghunt_result.get("error") else ""}
+                                                {f'<p style="color: #b0b0c0; font-size: 14px;"><strong>Mensaje:</strong> {ghunt_result.get("message", "N/A")}</p>' if ghunt_result.get("message") else ""}
+                                                <p style="color: #28a745; font-size: 14px; font-weight: bold;">✅ GHunt completó su análisis</p>
+                                            </div>
+                                            """, unsafe_allow_html=True)
+                            else:
+                                # Aquí mostramos mensajes específicos basados en el tipo de error
+                                error_msg = ghunt_result.get('error', '')
+                                message_msg = ghunt_result.get('message', '')
+
+                                # Mostrar mensaje específico
+                                if error_msg:
+                                    if 'index out of range' in error_msg.lower():
+                                        st.info(
+                                            "ℹ️ GHunt: No se encontró información para este email (posiblemente lista vacía)")
+                                    elif 'no disponible' in error_msg.lower():
+                                        st.info("ℹ️ GHunt: Servicio no disponible en esta instalación")
+                                    elif 'import' in error_msg.lower():
+                                        st.warning("⚠️ GHunt: No se puede importar módulo necesario")
+                                    else:
+                                        st.warning(f"⚠️ Error en GHunt: {error_msg}")
+                                elif message_msg:
+                                    st.info(f"ℹ️ {message_msg}")
+                                elif 'list index out of range' in message_msg.lower():
+                                    st.info("ℹ️ GHunt: No se encontró información para este email")
+                                else:
+                                    st.info("ℹ️ GHunt: No hay datos para mostrar (posiblemente email no encontrado)")
 
                     # Búsqueda en paste sites (opcional)
+                    # Esta sección se mantiene como estaba para evitar errores
                     try:
                         from modules.search.pastesearch import search_paste_sites
                         paste_results = search_paste_sites(search_email)
@@ -777,33 +799,33 @@ def show_person_search_ui():
                             for i, result in enumerate(paste_results):
                                 with st.expander(f"📄 {result['title']} ({result['source']})", expanded=False):
                                     st.markdown(f"""
-                                                        <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; 
-                                                                   padding: 15px; color: #e6e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
-                                                            <h5 style="margin: 0; color: #ffffff;">{result['title']}</h5>
-                                                            <p style="color: #b0b0c0; font-size: 14px;">
-                                                                <strong>Fecha:</strong> {result.get('date', 'Desconocida')}<br/>
-                                                                <strong>Tamaño:</strong> {result.get('size', 'N/A')}<br/>
-                                                                <strong>Idioma:</strong> {result.get('language', 'N/A')}<br/>
-                                                                <strong>Fuente:</strong> {result.get('source', 'N/A')}
-                                                            </p>
-                                                            <a href="{result.get('url', '#')}" target="_blank" style="color: #28a745; text-decoration: underline; font-size: 13px;">
-                                                                🌐 Ver enlace
-                                                            </a>
-                                                        </div>
-                                                        """, unsafe_allow_html=True)
+                                    <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                               padding: 15px; color: #e6e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                                        <h5 style="margin: 0; color: #ffffff;">{result['title']}</h5>
+                                        <p style="color: #b0b0c0; font-size: 14px;">
+                                            <strong>Fecha:</strong> {result.get('date', 'Desconocida')}<br/>
+                                            <strong>Tamaño:</strong> {result.get('size', 'N/A')}<br/>
+                                            <strong>Idioma:</strong> {result.get('language', 'N/A')}<br/>
+                                            <strong>Fuente:</strong> {result.get('source', 'N/A')}
+                                        </p>
+                                        <a href="{result.get('url', '#')}" target="_blank" style="color: #28a745; text-decoration: underline; font-size: 13px;">
+                                            🌐 Ver enlace
+                                        </a>
+                                    </div>
+                                    """, unsafe_allow_html=True)
                         else:
                             st.info("🔍 No se encontraron resultados en paste sites")
                     except Exception as e:
                         st.info(f"🔍 Sin resultados de paste sites: {str(e)}")
 
-                        # Marcar que ya se hizo la búsqueda
+                    # Marcar que ya se hizo la búsqueda
                     st.session_state['email_search_done'] = True
 
                 except Exception as e:
                     st.error(f"❌ Error en búsqueda de email: {str(e)}")
                     logger.error(f"Error al buscar información de email: {e}")
-            else:
-                st.info("🔍 Búsqueda ya realizada para este correo")
+        else:
+            st.info("🔍 Búsqueda ya realizada para este correo")
     if search_location:
         search_terms.extend([term.strip() for term in search_location.split() if term.strip()])
     if search_company:
@@ -934,7 +956,8 @@ def show_person_search_ui():
         # Recomendaciones de seguridad
         st.markdown("### 🔐 Recomendaciones de Seguridad")
         st.info("""
-        - Asegúrate de tener Tor corriendo en tu máquina (127.0.0.1:9050)
+        - Asegúrate de tener Tor corriendo en tu máquina (127.0.0.1:9050)continua por favor
+        
         - Usa claves API con acceso mínimo
         - Analiza datos sensibles en entornos anónimos
         - Cambia tu identidad de Tor periódicamente para mantener privacidad

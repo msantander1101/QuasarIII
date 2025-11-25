@@ -704,7 +704,6 @@ def show_person_search_ui():
         st.subheader("📧 Búsqueda Automática de Email")
 
         # Verificar si ya hemos hecho la búsqueda de email
-
         if 'email_search_done' not in st.session_state or not st.session_state.get('email_search_done'):
             st.info("🔍 Detectado email. Realizando búsqueda automática...")
 
@@ -713,7 +712,6 @@ def show_person_search_ui():
                     # Importar módulos necesarios
                     from modules.search.emailint import check_email_breach, search_email_paste_accounts, \
                         search_email_info
-                    from modules.search.pastesearch import search_paste_sites
 
                     st.info("🔍 Realizando búsqueda de información de email...")
 
@@ -721,86 +719,91 @@ def show_person_search_ui():
                     email_info_result = search_email_info(search_email, st.session_state.get('current_user_id', 1))
 
                     # Mostrar resultados principales (brechas)
-                    if "breeches_info" in email_info_result:
-                        breach_result = email_info_result["breeches_info"]
+                    if "breaches" in email_info_result:
+                        breach_result = email_info_result["breaches"]
                         if isinstance(breach_result, dict):
                             if breach_result.get('breached') or breach_result.get('breach_count', 0) > 0:
                                 st.markdown("### 📧 Brecha de Email Encontrada")
                                 st.markdown(f"""
-                                   <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; 
-                                              padding: 15px; color: #e6e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
-                                       <h5 style="margin: 0; color: #ffffff;">Email comprometido</h5>
-                                       <p style="color: #b0b0c0; font-size: 14px;">
-                                           <strong>Email:</strong> {breach_result.get('email', 'N/A')}<br/>
-                                           <strong>Breaches:</strong> {breach_result.get('breach_count', 0)}<br/>
-                                           <strong>Fuente:</strong> {breach_result.get('source', 'N/A')}<br/>
-                                           <strong>Confianza:</strong> {breach_result.get('confidence', 0.0):.2f}
-                                       </p>
-                                       {f'<p style="color: #b0b0c0; font-size: 14px;"><strong>Mensaje:</strong> {breach_result.get("message", "N/A")}</p>' if breach_result.get("message") else ""}
-                                   </div>
-                                   """, unsafe_allow_html=True)
+                                <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                           padding: 15px; color: #e6e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                                    <h5 style="margin: 0; color: #ffffff;">Email comprometido</h5>
+                                    <p style="color: #b0b0c0; font-size: 14px;">
+                                        <strong>Email:</strong> {breach_result.get('email', search_email)}<br/>
+                                        <strong>Breaches:</strong> {breach_result.get('breach_count', 0)}<br/>
+                                        <strong>Fuente:</strong> {breach_result.get('source', 'N/A')}<br/>
+                                        <strong>Confianza:</strong> {breach_result.get('confidence', 0.0):.2f}
+                                    </p>
+                                    {f'<p style="color: #b0b0c0; font-size: 14px;"><strong>Mensaje:</strong> {breach_result.get("message", "N/A")}</p>' if breach_result.get("message") else ""}
+                                </div>
+                                """, unsafe_allow_html=True)
                             else:
                                 st.info("✅ No se encontraron brechas para este correo")
                         else:
                             st.warning("⚠️ No se pudo obtener información de brechas")
 
-                    # Mostrar resultados de GHunt si existen
-                    if "ghunt_info" in email_info_result:
-                        ghunt_result = email_info_result["ghunt_info"]
+                    # Mostrar resultados de GHunt
+                    if "ghunt" in email_info_result:
+                        ghunt_result = email_info_result["ghunt"]
                         if isinstance(ghunt_result, dict):
                             if ghunt_result.get("success"):
                                 st.markdown("### 🕵️ Resultados de GHunt")
                                 st.markdown(f"""
-                                   <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; 
-                                              padding: 15px; color: #e6e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
-                                       <h5 style="margin: 0; color: #ffffff;">GHunt Report</h5>
-                                       <p style="color: #b0b0c0; font-size: 14px;">
-                                           <strong>Fuente:</strong> {ghunt_result.get('source', 'N/A')}<br/>
-                                           <strong>Estado:</strong> {'Exitoso' if ghunt_result.get('success') else 'Fallido'}<br/>
-                                           <strong>Tiempo:</strong> {ghunt_result.get('timestamp', 'N/A')}
-                                       </p>
-                                       {f'<p style="color: #b0b0c0; font-size: 14px;"><strong>Error:</strong> {ghunt_result.get("error", "N/A")}</p>' if ghunt_result.get("error") else ""}
-                                       {'<p style="color: #b0b0c0; font-size: 14px;">✅ Datos de GHunt obtenidos exitosamente</p>' if ghunt_result and not ghunt_result.get("error") and not ghunt_result.get("success") == False else ''}
-                                   </div>
-                                   """, unsafe_allow_html=True)
-                            elif ghunt_result.get("error"):
+                                <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                           padding: 15px; color: #e6e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                                    <h5 style="margin: 0; color: #ffffff;">Reporte de GHunt</h5>
+                                    <p style="color: #b0b0c0; font-size: 14px;">
+                                        <strong>Fuente:</strong> {ghunt_result.get('source', 'N/A')}<br/>
+                                        <strong>Estado:</strong> {'Exitoso' if ghunt_result.get('success') else 'Fallido'}<br/>
+                                        <strong>Tiempo:</strong> {ghunt_result.get('timestamp', 'N/A')}
+                                    </p>
+                                    {f'<p style="color: #b0b0c0; font-size: 14px;"><strong>Error:</strong> {ghunt_result.get("error", "N/A")}</p>' if ghunt_result.get("error") else ""}
+                                    {f'<p style="color: #b0b0c0; font-size: 14px;">✅ GHunt obtuvo resultados</p>' if ghunt_result.get("success") and ghunt_result.get("data") else ''}
+                                </div>
+                                """, unsafe_allow_html=True)
+                            elif ghunt_result.get('error'):
                                 # Mostrar error de GHunt si hay
                                 st.warning(f"⚠️ Error en GHunt: {ghunt_result.get('error')}")
-                            elif ghunt_result.get("success") == False:
-                                st.info("ℹ️ GHunt no pudo realizar la búsqueda")
+                            elif ghunt_result.get('message'):
+                                # Mostrar mensaje si GHunt no está disponible
+                                st.info(f"ℹ️ {ghunt_result.get('message')}")
 
                     # Búsqueda en paste sites (opcional)
-                    paste_results = search_paste_sites(search_email)
-                    if paste_results:
-                        st.markdown("### 📄 Resultados de Paste Sites")
-                        for i, result in enumerate(paste_results):
-                            with st.expander(f"📄 {result['title']} ({result['source']})", expanded=False):
-                                st.markdown(f"""
-                                   <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; 
-                                              padding: 15px; color: #e6e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
-                                       <h5 style="margin: 0; color: #ffffff;">{result['title']}</h5>
-                                       <p style="color: #b0b0c0; font-size: 14px;">
-                                           <strong>Fecha:</strong> {result.get('date', 'Desconocida')}<br/>
-                                           <strong>Tamaño:</strong> {result.get('size', 'N/A')}<br/>
-                                           <strong>Idioma:</strong> {result.get('language', 'N/A')}<br/>
-                                           <strong>Fuente:</strong> {result.get('source', 'N/A')}
-                                       </p>
-                                       <a href="{result.get('url', '#')}" target="_blank" style="color: #28a745; text-decoration: underline; font-size: 13px;">
-                                           🌐 Ver enlace
-                                       </a>
-                                   </div>
-                                   """, unsafe_allow_html=True)
-                    else:
-                        st.info("🔍 No se encontraron resultados en paste sites")
+                    try:
+                        from modules.search.pastesearch import search_paste_sites
+                        paste_results = search_paste_sites(search_email)
+                        if paste_results:
+                            st.markdown("### 📄 Resultados de Paste Sites")
+                            for i, result in enumerate(paste_results):
+                                with st.expander(f"📄 {result['title']} ({result['source']})", expanded=False):
+                                    st.markdown(f"""
+                                                        <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                                                   padding: 15px; color: #e6e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                                                            <h5 style="margin: 0; color: #ffffff;">{result['title']}</h5>
+                                                            <p style="color: #b0b0c0; font-size: 14px;">
+                                                                <strong>Fecha:</strong> {result.get('date', 'Desconocida')}<br/>
+                                                                <strong>Tamaño:</strong> {result.get('size', 'N/A')}<br/>
+                                                                <strong>Idioma:</strong> {result.get('language', 'N/A')}<br/>
+                                                                <strong>Fuente:</strong> {result.get('source', 'N/A')}
+                                                            </p>
+                                                            <a href="{result.get('url', '#')}" target="_blank" style="color: #28a745; text-decoration: underline; font-size: 13px;">
+                                                                🌐 Ver enlace
+                                                            </a>
+                                                        </div>
+                                                        """, unsafe_allow_html=True)
+                        else:
+                            st.info("🔍 No se encontraron resultados en paste sites")
+                    except Exception as e:
+                        st.info(f"🔍 Sin resultados de paste sites: {str(e)}")
 
-                    # Marcar que ya se hizo la búsqueda
+                        # Marcar que ya se hizo la búsqueda
                     st.session_state['email_search_done'] = True
 
                 except Exception as e:
                     st.error(f"❌ Error en búsqueda de email: {str(e)}")
                     logger.error(f"Error al buscar información de email: {e}")
-        else:
-            st.info("🔍 Búsqueda ya realizada para este correo")
+            else:
+                st.info("🔍 Búsqueda ya realizada para este correo")
     if search_location:
         search_terms.extend([term.strip() for term in search_location.split() if term.strip()])
     if search_company:

@@ -5,22 +5,20 @@ Búsqueda real de información de email con integración a APIs reales (HIBP + S
 """
 import hashlib
 import logging
-import subprocess
-import tempfile
-
 import requests
 import time
 import json
 import re
 from typing import Dict, List, Any
-from urllib.parse import quote_plus
 from core.config_manager import config_manager
+import asyncio
 
 logger = logging.getLogger(__name__)
 
-# Intento de importar GHunt
+# --- Intentar importar GHunt como módulo Python ---
 try:
-    from ghunt import GHunt
+    from ghunt.modules.email import hunt as ghunt_hunt
+    from ghunt.helpers.ghunt_types import GHuntError
     GHUNT_AVAILABLE = True
 except ImportError:
     GHUNT_AVAILABLE = False
@@ -40,12 +38,6 @@ class EmailSearcher:
             'Accept-Language': 'en-US,en;q=0.9',
         })
         self.timeout = 30
-
-        # Inicializar GHunt si está disponible
-        if GHUNT_AVAILABLE:
-            self.ghunt = GHunt()
-        else:
-            self.ghunt = None
 
     def get_user_email_sources(self, user_id: int) -> Dict[str, Dict]:
         """
@@ -90,33 +82,27 @@ class EmailSearcher:
 
         return sources
 
+    # --- GHunt como módulo Python ---
     def search_ghunt(self, email: str) -> Dict[str, Any]:
+        if not GHUNT_AVAILABLE:
+            return {"success": False, "error": "GHunt no disponible"}
+
         try:
-            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
-                tmp_path = tmp.name
-
-            cmd = ["ghunt", "email", email, "--json", tmp_path]
-            result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-
-            if result.returncode != 0:
-                logger.warning(f"GHunt fallo parcial para {email}: {result.stderr.strip()}")
-                return {"success": False, "error": result.stderr.strip()}
-
-            with open(tmp_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            return {"success": True, "data": data}
-
+            # hunt() es async, usamos asyncio.run para ejecutarlo
+            result = asyncio.run(ghunt_hunt(None, email))
+            return {"success": True, "data": result}
+        except GHuntError as e:
+            return {"success": False, "error": f"GHuntError: {str(e)}"}
         except Exception as e:
-            logger.exception(f"Error ejecutando GHunt para {email}")
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": f"Error inesperado GHunt: {str(e)}"}
 
     # --- Métodos existentes ---
     def check_email_breach(self, email: str, user_id: int) -> Dict[str, Any]:
-        # Implementación de HIBP, SkyMem, Hunter
+        # Implementación HIBP, SkyMem, Hunter
         ...
 
     def search_email_paste_accounts(self, email: str, user_id: int) -> Dict[str, Any]:
+        # Implementación existente
         ...
 
     def verify_email_format(self, email: str) -> bool:
@@ -124,8 +110,10 @@ class EmailSearcher:
         return bool(re.match(pattern, email))
 
     def verify_email_deliverability(self, email: str, user_id: int) -> Dict[str, Any]:
+        # Implementación existente
         ...
 
+    # --- Búsqueda completa ---
     def search_email_info(self, email: str, user_id: int, services: List[str] = None) -> Dict[str, Any]:
         start_time = time.time()
         results = {
@@ -139,16 +127,25 @@ class EmailSearcher:
         }
 
         # Brechas
-        breach_result = self.check_email_breach(email, user_id)
-        results["breeches_info"] = breach_result if isinstance(breach_result, dict) else {"error": str(breach_result)}
+        try:
+            breach_result = self.check_email_breach(email, user_id)
+            results["breeches_info"] = breach_result if isinstance(breach_result, dict) else {"error": str(breach_result)}
+        except Exception as e:
+            results["errors"].append({"breaches": str(e)})
 
         # Paste accounts
-        paste_result = self.search_email_paste_accounts(email, user_id)
-        results["paste_info"] = paste_result if isinstance(paste_result, dict) else {"error": str(paste_result)}
+        try:
+            paste_result = self.search_email_paste_accounts(email, user_id)
+            results["paste_info"] = paste_result if isinstance(paste_result, dict) else {"error": str(paste_result)}
+        except Exception as e:
+            results["errors"].append({"paste": str(e)})
 
         # Verificación
-        verify_result = self.verify_email_deliverability(email, user_id)
-        results["verification_info"] = verify_result if isinstance(verify_result, dict) else {"error": str(verify_result)}
+        try:
+            verify_result = self.verify_email_deliverability(email, user_id)
+            results["verification_info"] = verify_result if isinstance(verify_result, dict) else {"error": str(verify_result)}
+        except Exception as e:
+            results["errors"].append({"verification": str(e)})
 
         # GHunt
         ghunt_result = self.search_ghunt(email)
@@ -161,10 +158,10 @@ class EmailSearcher:
         return results
 
 
-# Instancia global
+# --- Instancia global ---
 email_searcher = EmailSearcher()
 
-# Funciones públicas
+# --- Funciones públicas ---
 check_email_breach = email_searcher.check_email_breach
 search_email_paste_accounts = email_searcher.search_email_paste_accounts
 verify_email_format = email_searcher.verify_email_format

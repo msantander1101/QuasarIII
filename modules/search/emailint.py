@@ -18,7 +18,7 @@ from core.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
 
-# Importa GHunt directamente
+# Intento de importar GHunt
 try:
     from ghunt import GHunt
     GHUNT_AVAILABLE = True
@@ -91,21 +91,29 @@ class EmailSearcher:
         return sources
 
     def search_ghunt(self, email: str) -> Dict[str, Any]:
-        """
-        Búsqueda de email usando GHunt de manera segura
-        """
-        if not self.ghunt:
-            return {"success": False, "error": "GHunt no está disponible"}
-
         try:
-            result = self.ghunt.email_search(email)
-            return {"success": True, "data": result}
+            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+                tmp_path = tmp.name
+
+            cmd = ["ghunt", "email", email, "--json", tmp_path]
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+            if result.returncode != 0:
+                logger.warning(f"GHunt fallo parcial para {email}: {result.stderr.strip()}")
+                return {"success": False, "error": result.stderr.strip()}
+
+            with open(tmp_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            return {"success": True, "data": data}
+
         except Exception as e:
+            logger.exception(f"Error ejecutando GHunt para {email}")
             return {"success": False, "error": str(e)}
 
-    # --- Mantener métodos existentes ---
+    # --- Métodos existentes ---
     def check_email_breach(self, email: str, user_id: int) -> Dict[str, Any]:
-        # Tu implementación existente de HIBP, SkyMem, Hunter
+        # Implementación de HIBP, SkyMem, Hunter
         ...
 
     def search_email_paste_accounts(self, email: str, user_id: int) -> Dict[str, Any]:

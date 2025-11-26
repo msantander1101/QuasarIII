@@ -1,21 +1,20 @@
-# modules/search/emailint.py - Versión simplificada y compatible (última actualización)
+# modules/search/emailint.py
 
-"""
-Búsqueda real de información de email con integración a APIs reales
-(HIBP + SkyMem + verificación)
-"""
 import hashlib
-import logging
-import requests
-import time
 import re
-import asyncio
+import time
+import logging
 import subprocess
 import sys
-import os
-from typing import Dict, List, Any
+import importlib.util
+import asyncio
+import json
+from typing import Dict, Any, List
+from requests import Session
+
 from core.config_manager import config_manager
 
+# Configurar logger
 logger = logging.getLogger(__name__)
 
 # ============================================================
@@ -42,7 +41,7 @@ def check_ghunt_availability():
             return True
         except ImportError as e:
             logger.warning(f"No se puede importar módulo email de GHunt: {e}")
-            # Intentamos importar solo el módulo principal
+            # Intente importar solo el módulo principal
             try:
                 import ghunt.modules.email
                 GHUNT_AVAILABLE = True
@@ -90,13 +89,23 @@ except Exception as e:
 
 
 # ============================================================
+#        FUNCIONES AUXILIARES DISPONIBLES GLOBALMENTE
+# ============================================================
+
+def verify_email_format(email: str) -> bool:
+    """Verifica el formato de un correo electrónico"""
+    pattern = r'^[a-zA-Z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+    return bool(re.match(pattern, email))
+
+
+# ============================================================
 #                 CLASE PRINCIPAL DE BÚSQUEDA
 # ============================================================
 
 class EmailSearcher:
 
     def __init__(self):
-        self.session = requests.Session()
+        self.session = Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0',
             'Accept': 'application/json',
@@ -146,102 +155,6 @@ class EmailSearcher:
         return sources
 
     # ============================================================
-    #                 INTEGRACIÓN GHUNT SIMPLIFICADA
-    # ============================================================
-
-    def search_ghunt(self, email: str) -> Dict[str, Any]:
-        # Si GHunt no está disponible, devolver resultado indicando que no está disponible
-        if not GHUNT_AVAILABLE:
-            return {
-                "success": False,
-                "error": "GHunt no disponible",
-                "source": "ghunt",
-                "message": "GHunt no está disponible o instalado correctamente",
-                "timestamp": time.time()
-            }
-
-        try:
-            # Intentar importar exactamente como se haría normalmente
-            # Primero intentar lo que funciona según los imports que están bien
-
-            # Importar usando el módulo de email (forma más directa)
-            try:
-                from ghunt.modules.email import hunt as ghunt_hunt
-                success = True
-                message = "Módulo de email importado correctamente"
-            except ImportError as e:
-                logger.warning(f"Fallo al importar ghunt_hunt: {e}")
-                success = False
-                message = f"Fallo al importar: {str(e)}"
-
-            # Si tenemos éxito en la importación, intentamos invocar GHunt
-            if success:
-                try:
-                    # Usar un bucle de eventos seguro
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-
-                    result = loop.run_until_complete(ghunt_hunt(None, email))
-                    loop.close()
-
-                    # Verificar resultado
-                    if not result:
-                        return {
-                            "success": False,
-                            "error": "GHunt devolvió datos vacíos",
-                            "source": "ghunt",
-                            "message": "GHunt no devolvió datos para este email",
-                            "timestamp": time.time()
-                        }
-
-                    return {
-                        "success": True,
-                        "data": result,
-                        "source": "ghunt",
-                        "timestamp": time.time()
-                    }
-                except IndexError as e:
-                    # Manejar específicamente el error "list index out of range"
-                    error_msg = f"GHunt: lista vacía para email {email} - {str(e)}"
-                    logger.warning(error_msg)
-                    return {
-                        "success": False,
-                        "error": "List index out of range en GHunt",
-                        "source": "ghunt",
-                        "message": "GHunt no encontró información para este email (posiblemente lista vacía)",
-                        "timestamp": time.time()
-                    }
-                except Exception as e:
-                    error_msg = f"Error en ejecución de GHunt: {str(e)}"
-                    logger.error(error_msg)
-                    return {
-                        "success": False,
-                        "error": error_msg,
-                        "source": "ghunt",
-                        "message": "Imposible ejecutar GHunt",
-                        "timestamp": time.time()
-                    }
-            else:
-                # Si no se pudo importar, devolver error
-                return {
-                    "success": False,
-                    "error": "No se pudo importar módulo GHunt",
-                    "source": "ghunt",
-                    "message": message,
-                    "timestamp": time.time()
-                }
-
-        except Exception as e:
-            error_msg = f"Error general en GHunt: {str(e)}"
-            logger.error(error_msg)
-            return {
-                "success": False,
-                "error": error_msg,
-                "source": "ghunt",
-                "timestamp": time.time()
-            }
-
-    # ============================================================
     #              HIBP — CHECK REAL
     # ============================================================
 
@@ -286,7 +199,7 @@ class EmailSearcher:
     # ============================================================
 
     def check_email_breach(self, email: str, user_id: int) -> Dict[str, Any]:
-        if not self.verify_email_format(email):
+        if not verify_email_format(email):  # Usar la función auxiliar global
             return {"error": "Formato de email inválido", "source": "format"}
 
         # Obtener todas las fuentes disponibles para este usuario
@@ -349,16 +262,169 @@ class EmailSearcher:
             "source": "paste"
         }
 
-    def verify_email_format(self, email: str) -> bool:
-        pattern = r'^[a-zA-Z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
-        return bool(re.match(pattern, email))
-
     def verify_email_deliverability(self, email: str, user_id: int) -> Dict[str, Any]:
         return {
             "email": email,
             "deliverable": "unknown",
             "source": "basic_verification"
         }
+
+    # ============================================================
+    #                 INTEGRACIÓN GHUNT CON MANEJO DE ERRORES
+    # ============================================================
+
+    def search_ghunt(self, email: str) -> Dict[str, Any]:
+        # Si GHunt no está disponible, devolver resultado indicando que no está disponible
+        if not GHUNT_AVAILABLE:
+            return {
+                "success": False,
+                "error": "GHunt no disponible",
+                "source": "ghunt",
+                "message": "GHunt no está disponible o instalado correctamente",
+                "timestamp": time.time()
+            }
+
+        try:
+            # Intentar importar exactamente como se haría normalmente
+            # Primero intentar lo que funciona según los imports que están bien
+
+            # Importar usando el módulo de email (forma más directa)
+            try:
+                from ghunt.modules.email import hunt as ghunt_hunt
+                success = True
+                message = "Módulo de email importado correctamente"
+            except ImportError as e:
+                logger.warning(f"Fallo al importar ghunt_hunt: {e}")
+                success = False
+                message = f"Fallo al importar: {str(e)}"
+
+            # Si tenemos éxito en la importación, intentamos invocar GHunt
+            if success:
+                try:
+                    # Usar un bucle de eventos seguro
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                    # Invocar la función con manejo específico de errores
+                    result = loop.run_until_complete(ghunt_hunt(None, email))
+                    loop.close()
+
+                    # Verificar resultado
+                    if not result:
+                        return {
+                            "success": False,
+                            "error": "GHunt devolvió datos vacíos",
+                            "source": "ghunt",
+                            "message": "GHunt no devolvió datos para este email",
+                            "timestamp": time.time()
+                        }
+
+                    # Formatear correctamente el resultado
+                    formatted_result = {
+                        "success": True,
+                        "data": result,
+                        "source": "ghunt",
+                        "timestamp": time.time()
+                    }
+
+                    # Intentar hacer validación adicional si es necesario
+                    if isinstance(result, dict):
+                        # Verificar estructura de resultado aceptable
+                        if result.get('error') or len(str(result)) < 10:
+                            return {
+                                "success": False,
+                                "error": "Respuesta inválida de GHunt",
+                                "source": "ghunt",
+                                "message": "GHunt no encontró información para este email",
+                                "raw_data": str(result)[:200] + "..." if len(str(result)) > 200 else str(result),
+                                "timestamp": time.time()
+                            }
+
+                    return formatted_result
+
+                except IndexError as e:
+                    # Manejar específicamente el error "list index out of range"
+                    error_msg = f"GHunt: lista vacía para email {email} - {str(e)}"
+                    logger.warning(error_msg)
+                    return {
+                        "success": False,
+                        "error": "List index out of range en GHunt",
+                        "source": "ghunt",
+                        "message": "GHunt no encontró información para este email (posiblemente lista vacía)",
+                        "timestamp": time.time()
+                    }
+                except json.JSONDecodeError as e:
+                    # Especificamente manejar el caso de la respuesta JSON vacía
+                    # Añadir tratamiento más robusto para evitar logs molestantes
+                    logger.debug(f"Error de JSON en GHunt: {e}")
+                    error_str = str(e)
+                    if "Expecting value: line 1 column 1 (char 0)" in error_str:
+                        # Solo informar en modo debug para evitar spam en logs
+                        return {
+                            "success": False,
+                            "error": "GHunt: datos vacíos o respuesta vacía",
+                            "source": "ghunt",
+                            "message": "No se obtuvo información válida de GHunt para este email (posiblemente no encontrado)",
+                            "timestamp": time.time()
+                        }
+                    else:
+                        return {
+                            "success": False,
+                            "error": "Formato inválido en respuesta de GHunt",
+                            "source": "ghunt",
+                            "message": "GHunt devolvió respuesta no válida",
+                            "timestamp": time.time()
+                        }
+                except Exception as e:
+                    error_msg = f"Error en ejecución de GHunt: {str(e)}"
+                    logger.error(error_msg)
+                    detailed_error = str(e)
+                    # Detectar si es el error específico que mencionaste
+                    if "Expecting value: line 1 column 1 (char 0)" in detailed_error:
+                        return {
+                            "success": False,
+                            "error": "GHunt: datos vacíos o respuesta vacía",
+                            "source": "ghunt",
+                            "message": "GHunt no encontró información para este email",
+                            "raw_error": detailed_error,
+                            "timestamp": time.time()
+                        }
+                    else:
+                        return {
+                            "success": False,
+                            "error": error_msg,
+                            "source": "ghunt"
+                        }
+            else:
+                # Si no se pudo importar, devolver error
+                return {
+                    "success": False,
+                    "error": "No se pudo importar módulo GHunt",
+                    "source": "ghunt",
+                    "message": message,
+                    "timestamp": time.time()
+                }
+
+        except Exception as e:
+            error_msg = f"Error general en GHunt: {str(e)}"
+            logger.error(error_msg)
+            # Detectar casos específicos de error
+            detailed_error = str(e)
+            if "Expecting value: line 1 column 1 (char 0)" in detailed_error:
+                return {
+                    "success": False,
+                    "error": "GHunt: datos vacíos o respuesta vacía",
+                    "source": "ghunt",
+                    "message": "GHunt no encontró información para este email",
+                    "raw_error": detailed_error,
+                    "timestamp": time.time()
+                }
+            return {
+                "success": False,
+                "error": error_msg,
+                "source": "ghunt",
+                "timestamp": time.time()
+            }
 
     # ============================================================
     #            FUNCIÓN PRINCIPAL DE BÚSQUEDA COMPLETA
@@ -402,44 +468,75 @@ class EmailSearcher:
             results["errors"].append(error_msg)
             results["verification"] = {"error": error_msg}
 
-        # GHunt - solo si está disponible
-        if GHUNT_AVAILABLE:
-            try:
-                results["ghunt"] = self.search_ghunt(email)
-            except Exception as e:
-                error_msg = f"Error con GHunt: {str(e)}"
-                results["errors"].append(error_msg)
-                results["ghunt"] = {"error": error_msg}
-        else:
-            # Si no está disponible, indicarlo claramente
-            results["ghunt"] = {
-                "message": "GHunt no disponible en esta instalación",
-                "source": "ghunt",
-                "available": False
-            }
+        # GHunt
+        try:
+            results["ghunt"] = self.search_ghunt(email)
+        except Exception as e:
+            error_msg = f"Error buscando con GHunt: {str(e)}"
+            results["errors"].append(error_msg)
+            results["ghunt"] = {"error": error_msg}
 
+        # Tiempo de búsqueda
         results["search_time"] = time.time() - start
+
+        # Devolver resultados
         return results
 
 
 # ============================================================
-#                INSTANCIA GLOBAL + WRAPPERS
+#           FUNCIÓN GLOBAL PARA IMPORTACIÓN DIRECTA
 # ============================================================
 
-email_searcher = EmailSearcher()
+# Función para verificar brechas de correo (función global)
+def check_email_breach(email: str, user_id: int) -> Dict[str, Any]:
+    """
+    Función global para verificar brechas de correo electrónico.
 
-check_email_breach = email_searcher.check_email_breach
-search_email_paste_accounts = email_searcher.search_email_paste_accounts
-verify_email_format = email_searcher.verify_email_format
-verify_email_deliverability = email_searcher.verify_email_deliverability
-search_email_info = email_searcher.search_email_info
+    Esta función permite importar directamente check_email_breach sin requerir
+    crear una instancia de EmailSearcher primero.
+
+    Args:
+        email (str): Dirección de correo electrónico a verificar
+        user_id (int): ID del usuario solicitante para buscar configuraciones
+
+    Returns:
+        Dict[str, Any]: Resultados de la verificación de brechas
+    """
+    searcher = EmailSearcher()
+    return searcher.check_email_breach(email, user_id)
 
 
-# Agregar funciones auxiliares si se necesita
-def get_ghunt_status() -> Dict[str, Any]:
-    """Devolver información sobre el estado de GHunt"""
-    return {
-        "available": GHUNT_AVAILABLE,
-        "install_error": GHUNT_INSTALL_ERROR,
-        "message": "GHunt disponible" if GHUNT_AVAILABLE else f"GHunt no disponible (detalles: {GHUNT_INSTALL_ERROR if GHUNT_INSTALL_ERROR else 'Error desconocido'})"
-    }
+# Función para realizar búsqueda completa de correo (función global)
+def search_email_info(email: str, user_id: int, services: List[str] = None) -> Dict[str, Any]:
+    """
+    Función global para búsqueda completa de correo electrónico.
+
+    Esta función permite importar directamente search_email_info sin requerir
+    crear una instancia de EmailSearcher primero.
+
+    Args:
+        email (str): Dirección de correo electrónico a buscar
+        user_id (int): ID del usuario solicitante para buscar configuraciones
+        services (List[str], optional): Lista de servicios específicos a usar
+
+    Returns:
+        Dict[str, Any]: Resultados completos de la búsqueda
+    """
+    searcher = EmailSearcher()
+    return searcher.search_email_info(email, user_id, services)
+
+
+# Función para buscar paste de correo (función global)
+def search_email_paste_accounts(email: str, user_id: int) -> Dict[str, Any]:
+    """
+    Función global para buscar cuentas de paste asociadas a un correo.
+
+    Args:
+        email (str): Dirección de correo electrónico a buscar
+        user_id (int): ID del usuario solicitante
+
+    Returns:
+        Dict[str, Any]: Resultados de la búsqueda de paste
+    """
+    searcher = EmailSearcher()
+    return searcher.search_email_paste_accounts(email, user_id)

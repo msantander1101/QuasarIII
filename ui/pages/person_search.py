@@ -6,6 +6,7 @@ from modules.search.emailint import check_email_breach
 from modules.search import archive_search
 from modules.search.darkweb import search_dark_web_catalog, get_available_onion_search_engines, \
     check_onion_connectivity, get_darkweb_stats
+from modules.search.emailint import check_email_breach, verify_email_format
 from modules.search.pastesearch import search_paste_sites, search_leaks
 from core.db_manager import create_person, get_persons_by_user
 import json
@@ -214,15 +215,26 @@ def show_person_search_ui():
 
     # --- Botones adicionales ---
     with col_actions[1]:
-        if st.button("🔄 Limpiar", use_container_width=True):
-            for key in [
+        if st.button("🔄 Limpiar", use_container_width=True, key="btn_clear", help="Limpiar todos los campos"):
+            # Usar set_state de manera segura
+            # Primero limpiar todos los valores
+            keys_to_clear = [
                 "search_name", "search_email", "search_location", "search_phone",
                 "search_domain", "search_files", "search_company", "search_role",
                 "date_start", "date_end", "search_sources", "search_relationship", "search_confidence"
-            ]:
-                st.session_state[key] = "" if key != "search_confidence" else 0.7
+            ]
+
+            # Limpiar cada campo por separado para evitar error de Streamlit
+            for key in keys_to_clear:
+                # Comprobación segura
+                if key in st.session_state:
+                    st.session_state[key] = "" if key != "search_confidence" else 0.7  # Valor por defecto
+
+            # Limpiar resultados
             st.session_state['search_results'] = None
             st.session_state['darkweb_results'] = None
+
+            # Solo re ejecutar la página si es necesario
             st.rerun()
 
     with col_actions[2]:
@@ -327,10 +339,15 @@ def show_person_search_ui():
                                         elif 'warning' in result_data:
                                             st.info(f"{display_name}: {result_data['warning']}")
                                         else:
-                                            st.markdown(f"#### {display_name} resultados")
-                                            st.json(result_data)
+                                            st.markdown(f"#### {display_name} Resultados")
+                                            if 'data' in result_data:  # Datos estructurados
+                                                st.json(result_data['data'])
+                                            elif 'raw_output' in result_data:  # Salida cruda
+                                                st.markdown(f"Raw output: `{result_data['raw_output'][:200]}...`")
+                                            else:
+                                                st.json(result_data)  # Fallback JSON
                                     else:
-                                        st.markdown(f"#### {display_name} resultados")
+                                        st.markdown(f"#### {display_name} Resultados")
                                         st.json(result_data)
                             break
 

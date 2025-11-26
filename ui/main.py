@@ -32,7 +32,7 @@ from modules.search.darkweb import (
     get_darkweb_stats
 )
 # Importar desde socmint
-from modules.search.socmint import search_social_profiles, analyze_social_profile, get_social_network_graph
+from modules.search.socmint import search_social_profiles, get_supported_platforms
 
 # Importa el logger
 from utils.logger import setup_logger

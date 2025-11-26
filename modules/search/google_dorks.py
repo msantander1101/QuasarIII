@@ -116,68 +116,69 @@ def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, any]]:
 
 # -------------------------------------------------------------------------
 # 🔥 DORKS PROFESIONALES POR DEFECTO (OSINT + HUELLA DIGITAL)
+# USANDO intext: PARA BUSCAR TEXTOS EXACTOS
 # -------------------------------------------------------------------------
 DEFAULT_DORKS = [
     # ------------------------------
     # 🔎 Perfiles & Huella Digital
     # ------------------------------
-    'site:linkedin.com/in',
-    'site:instagram.com',
-    'site:twitter.com',
-    'site:t.me',
-    'site:keybase.io',
-    '"powered by discourse" "view user"',
-    '"index of /users"',
+    'intext:"{}" site:linkedin.com/in',
+    'intext:"{}" site:instagram.com',
+    'intext:"{}" site:twitter.com',
+    'intext:"{}" site:t.me',
+    'intext:"{}" site:keybase.io',
+    'intext:"powered by discourse" intext:"view user"',
+    'intext:"index of /users"',
 
     # ------------------------------
     # 🔐 Leaks y credenciales
     # ------------------------------
-    'site:pastebin.com',
-    'site:ghostbin.com',
-    'site:dpaste.org',
-    '"password" "lastpass" filetype:txt',
-    '"password" "admin" filetype:xls',
-    '"credentials exposed"',
+    'intext:"{}" site:pastebin.com',
+    'intext:"{}" site:ghostbin.com',
+    'intext:"{}" site:dpaste.org',
+    'intext:"password" intext:"lastpass" filetype:txt',
+    'intext:"password" intext:"admin" filetype:xls',
+    'intext:"credentials exposed"',
 
     # -----------------------------------
     # 🧬 Repositorios (Github/GitLab leaks)
     # -----------------------------------
-    'site:github.com "API_KEY"',
-    'site:github.com "SECRET_KEY"',
-    'site:gitlab.com "token"',
-    '"filename:.env" "DB_PASSWORD"',
+    'intext:"{}" site:github.com "API_KEY"',
+    'intext:"{}" site:github.com "SECRET_KEY"',
+    'intext:"{}" site:gitlab.com "token"',
+    'intext:"filename:.env" intext:"DB_PASSWORD"',
 
     # -----------------------------------
     # 📄 Documentos sensibles
     # -----------------------------------
-    'filetype:pdf',
-    'filetype:xls',
-    'filetype:txt "confidential"',
-    'intitle:"index of" "backup"',
-    'intitle:"index of" "logs"',
+    'intext:"{}" filetype:pdf',
+    'intext:"{}" filetype:xls',
+    'intext:"{}" filetype:txt "confidential"',
+    'intext:"index of" intext:"backup"',
+    'intext:"index of" intext:"logs"',
 
     # -----------------------------------
     # 🔍 WordPress OSINT
     # -----------------------------------
-    'inurl:wp-config.php',
-    'inurl:wp-admin "index of"',
-    'site:*/wp-content/uploads',
-    'intitle:"WordPress Users"',
+    'intext:"{}" inurl:wp-config.php',
+    'intext:"{}" inurl:wp-admin "index of"',
+    'intext:"{}" site:*/wp-content/uploads',
+    'intext:"{}" intitle:"WordPress Users"',
 
     # -----------------------------------
     # ☁️ Cloud Buckets Públicos
     # -----------------------------------
-    'site:amazonaws.com "index of"',
-    'site:storage.googleapis.com "index of"',
-    '"index of" "azure"',
+    'intext:"{}" site:amazonaws.com "index of"',
+    'intext:"{}" site:storage.googleapis.com "index of"',
+    'intext:"{}" "index of" "azure"',
 
     # -----------------------------------
     # 🛰️ Infraestructura expuesta
     # -----------------------------------
-    '"Server at" "port" "Apache"',
-    '"Dashboard" "login" "admin"',
-    '"camera" "inurl:view.shtml"',
-    '"index of" "mysql dump"',
+    'intext:"Server at" intext:"port" intext:"Apache"',
+    'intext:"Dashboard" intext:"login" intext:"admin"',
+    'intext:"camera" intext:"inurl:view.shtml"',
+    'intext:"index of" intext:"mysql dump"',
 ]
 
 
@@ -222,7 +223,33 @@ def search_google_dorks(query: str,
 
     results: List[Dict[str, any]] = []
     for pattern in patterns:
-        dork_query = f"{pattern} {query}".strip()
+        # Usar intext: siempre que sea posible
+        if "{}" in pattern:
+            dork_query = pattern.format(query)
+        else:
+            dork_query = pattern
+
+        # Asegurarnos de que sea un dork de texto exacto si es una palabra o frase simple
+        if "intext:" not in pattern and not pattern.startswith('"'):
+            # Convertir patrones simples o específicos en intext:
+            if "site:" in pattern:
+                # Para patrones con sitio, no convertimos para mantener exactitud de dominio
+                pass
+            elif "filetype:" in pattern or "inurl:" in pattern:
+                # Mantener patrones técnicos intactos
+                pass
+            elif query.strip() and not ('"' in pattern and "intext:" in pattern):
+                # Para patrones simples, agregar intext:
+                if not "intext:" in dork_query:
+                    # Convertir a intext solo si no es una estructura compleja
+                    parts = dork_query.split()
+                    if len(parts) > 1:  # Es una frase
+                        # Solo convertir si el patrón no incluye intext o es de estilo "site:..."
+                        dork_query = f'intext:"{query}" {dork_query}'
+                    else:
+                        # Es una sola palabra, ponerla en intext: al principio
+                        dork_query = f'intext:"{query}" {dork_query}'
+
         google_url = f"https://www.google.com/search?q={quote_plus(dork_query)}"
         subresults = search_method(dork_query, min(3, max_results))
 
@@ -287,47 +314,47 @@ _DORKS_BY_TYPE = {
     # PERSONA (nombre real)
     # ---------------------------------------------------
     "person": [
-        '"{}" site:linkedin.com/in',
-        '"{}" site:facebook.com',
-        '"{}" site:instagram.com',
-        '"{}" "curriculum vitae"',
-        '"{}" "phone number"',
-        '"{}" "email"'
+        'intext:"{}" site:linkedin.com/in',
+        'intext:"{}" site:facebook.com',
+        'intext:"{}" site:instagram.com',
+        'intext:"{}" "curriculum vitae"',
+        'intext:"{}" "phone number"',
+        'intext:"{}" "email"'
     ],
 
     # ---------------------------------------------------
     # USERNAME (alias)
     # ---------------------------------------------------
     "username": [
-        '"{}" site:github.com',
-        '"{}" site:gitlab.com',
-        '"{}" site:keybase.io',
-        '"{}" site:twitter.com',
-        '"{}" site:steamcommunity.com',
-        '"{}" "username" "profile"'
+        'intext:"{}" site:github.com',
+        'intext:"{}" site:gitlab.com',
+        'intext:"{}" site:keybase.io',
+        'intext:"{}" site:twitter.com',
+        'intext:"{}" site:steamcommunity.com',
+        'intext:"{}" "username" "profile"'
     ],
 
     # ---------------------------------------------------
     # EMAIL
     # ---------------------------------------------------
     "email": [
-        '"{}" site:pastebin.com',
-        '"{}" site:ghostbin.com',
-        '"{}" filetype:txt "password"',
-        '"{}" "data breach"',
-        '"{}" "leaked"',
-        '"{}" "credential"'
+        'intext:"{}" site:pastebin.com',
+        'intext:"{}" site:ghostbin.com',
+        'intext:"{}" filetype:txt "password"',
+        'intext:"{}" "data breach"',
+        'intext:"{}" "leaked"',
+        'intext:"{}" "credential"'
     ],
 
     # ---------------------------------------------------
     # TELÉFONO
     # ---------------------------------------------------
     "phone": [
-        '"{}" "WhatsApp"',
-        '"{}" "Telegram"',
-        '"{}" "contact"',
-        '"{}" "lookup"',
-        '"{}" "reverse phone"'
+        'intext:"{}" "WhatsApp"',
+        'intext:"{}" "Telegram"',
+        'intext:"{}" "contact"',
+        'intext:"{}" "lookup"',
+        'intext:"{}" "reverse phone"'
     ],
 
     # ---------------------------------------------------
@@ -346,30 +373,30 @@ _DORKS_BY_TYPE = {
     # IP
     # ---------------------------------------------------
     "ip": [
-        '"{}" "port"',
-        '"{}" "open"',
-        '"{}" "ssh"',
-        '"{}" "vulnerable"',
-        '"{}" "camera"',
+        'intext:"{}" "port"',
+        'intext:"{}" "open"',
+        'intext:"{}" "ssh"',
+        'intext:"{}" "vulnerable"',
+        'intext:"{}" "camera"',
     ],
 
     # ---------------------------------------------------
     # SUBRED
     # ---------------------------------------------------
     "subnet": [
-        '"{}" "IP range"',
-        '"{}" "open services"',
-        '"{}" "network"'
+        'intext:"{}" "IP range"',
+        'intext:"{}" "open services"',
+        'intext:"{}" "network"'
     ],
 
     # ---------------------------------------------------
     # URL
     # ---------------------------------------------------
     "url": [
-        '"{}" "index of"',
-        '"{}" "backup"',
-        '"{}" "config"',
-        '"{}" "credentials"',
+        'intext:"{}" "index of"',
+        'intext:"{}" "backup"',
+        'intext:"{}" "config"',
+        'intext:"{}" "credentials"',
     ],
 }
 
@@ -390,6 +417,7 @@ def generate_profiled_dorks(query: str, user_patterns: Optional[List[str]] = Non
     Si NO pasa patrones: se generan automáticamente en base al tipo de dato.
     """
     if user_patterns:
+        # Usar patrones del usuario tal cual, aplicando el formato
         return [pattern.format(query) if "{}" in pattern else pattern for pattern in user_patterns]
 
     qtype = classify_query_type(query)

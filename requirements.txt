@@ -1,3 +1,4 @@
+sherlock
 ghunt
 beautifulsoup4
 pillow

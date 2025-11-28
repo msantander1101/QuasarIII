@@ -12,6 +12,8 @@ import json
 from typing import Dict, Any, List
 from requests import Session
 
+from core.config_manager import config_manager
+
 # Configurar logger
 logger = logging.getLogger(__name__)
 
@@ -92,14 +94,14 @@ except Exception as e:
 
 def verify_email_format(email: str) -> bool:
     """Verifica el formato de un correo electrónico."""
-    # Evitar errores de tipo None
-    if not email:
+    # Evitar errores de tipo None o vacío
+    if not email or not isinstance(email, str):
         return False
     # Normalizar el email (borrar espacios)
     email = email.strip()
     if not email:
         return False
-    # Patrón más flexible pero aún válido
+    # Patrón más flexible en algunas condiciones
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}$'
     return bool(re.match(pattern, email))
 
@@ -111,6 +113,30 @@ def is_valid_email_like_string(text: str) -> bool:
         return False
     # Si contiene @, probablemente sea un email o algo parecido
     return '@' in text and '.' in text.split('@')[1]
+
+
+def sanitize_query_for_email_search(query: str) -> str:
+    """
+    Intenta corregir o sanitizar una consulta para poder usarla en búsqueda de email.
+    Esto puede ser útil si se introduce un nombre en lugar de correo.
+    """
+    if not query or not isinstance(query, str):
+        return ""
+
+    # Normalizar el texto
+    query = query.strip()
+
+    # Intentamos extraer una posible dirección de email si hay @ en el texto
+    if '@' in query:
+        # Dividimos por espacios y buscamos fragmentos con @
+        parts = query.split()
+        for part in parts:
+            if '@' in part and '.' in part.split('@')[1]:
+                return part
+
+    # Si no encontramos email claro, pero tiene estructura de nombre
+    # intentamos formatearlo como posible email (puede ser usado en otras búsquedas)
+    return query
 
 
 # ============================================================
@@ -215,79 +241,75 @@ class EmailSearcher:
 
     def check_email_breach(self, email: str, user_id: int) -> Dict[str, Any]:
         """
-        Verifica brechas de seguridad para un email. Si el formato no es válido,
-        intenta verificar si es potencialmente un email o similar.
+        Verifica brechas de seguridad para un email.
+        Si no tiene formato válido, intenta manejar entradas como nombres.
         """
-        # Validar primeramente si es una cadena válida
+        # Primer validación: si viene vacía o no es una cadena
         if not email or not isinstance(email, str):
-            return {"error": "Formato de email inválido", "source": "format"}
+            return {
+                "error": "Entrada vacía o no válida para búsqueda de correo",
+                "source": "format",
+                "message": "Por favor ingrese un valor válido"
+            }
 
         # Normalizar el email
         normalized_email = email.strip()
         if not normalized_email:
-            return {"error": "Formato de email inválido", "source": "format"}
+            return {
+                "error": "Entrada vacía para búsqueda de correo",
+                "source": "format",
+                "message": "Por favor ingrese un valor válido"
+            }
 
-        # Intentar verificar formato de email
-        if verify_email_format(normalized_email):
-            # Es un email válido directamente
-            pass
-        elif is_valid_email_like_string(normalized_email):
-            # Puede ser potencialmente un email, intentarlo como tal
-            pass
-        else:
-            # No es un email ni parece tener forma de correo
-            # Pero aún así no abortar inmediatamente, podría estar buscando información general
-            # Solo mostrar aviso y continuar (ver implementación de más abajo)
-            logger.warning(f"Email '{normalized_email}' no sigue formato estándar, pero se procede")
+        # Llamada al validador de formato
+        is_valid = verify_email_format(normalized_email)
+        is_email_like = is_valid_email_like_string(normalized_email)
+
+        logger.debug(f"Validando correo: '{normalized_email}', válido: {is_valid}, email-like: {is_email_like}")
+
+        # Verificar y preparar datos para el chequeo
+        check_email = normalized_email
 
         # Obtener todas las fuentes disponibles para este usuario
         sources = self.get_user_email_sources(user_id)
         results = []
 
-        # HIBP - Primera prioridad
+        # HIBP - Primera prioridad (solo si tiene formato de correo)
         hibp_cfg = sources.get("hibp")
         if hibp_cfg and hibp_cfg.get("enabled") and hibp_cfg.get("api_key"):
-            try:
-                # Verificar si el input tiene formato válido antes de usarlo
-                if verify_email_format(normalized_email):
-                    data = self._check_hibp_breach_real(normalized_email, hibp_cfg["api_key"])
+            # Solo ejecutar HIBP si parece realmente un email
+            if is_valid:
+                try:
+                    data = self._check_hibp_breach_real(check_email, hibp_cfg["api_key"])
                     results.append(data)
                     if data.get("breached"):
                         # Devolver inmediatamente si se encuentra una brecha
                         return data
-                else:
-                    # Si no tiene formato de email válido pero es candidato,
-                    # podríamos aún buscar en bases de datos de brechas
-                    # pero esto depende de la lógica interna de la API
-                    logger.warning("Email potencial no válido para HIBP, omitiendo este método")
-            except Exception as e:
-                logger.warning(f"Error con HIBP: {e}")
+                except Exception as e:
+                    logger.warning(f"Error con HIBP: {e}")
+            elif is_email_like:
+                # Si es potencialmente un correo, puede que la busqueda se haga de forma más amplia
+                logger.info(f"Email potencial '{check_email}' (pero no válido formal).")
+                # Podríamos optar por no usar HIBP para este tipo de entrada o continuar
+                # Como no es formato claro, se puede continuar pero con menos peso
+            else:
+                # No es email válido ni potencial, se deja de buscar brechas por HIBP
+                logger.info(f"Valor '{check_email}' no cumple formato de email, omitiendo HIBP.")
 
         # GHunt - Segunda prioridad
         if sources.get("ghunt", {}).get("enabled") and GHUNT_AVAILABLE:
             try:
-                ghunt_result = self.search_ghunt(normalized_email)  # Ya no se pasa como email si no es válido
+                # Para GHunt, podemos pasar cualquier valor, pero si no es válido, usamos un aviso
+                ghunt_result = self.search_ghunt(check_email)
                 # Añadir resultado de GHunt con validación de resultado
                 if isinstance(ghunt_result, dict) and not ghunt_result.get('success', True):
-                    # Si GHunt falló en validar como correo, puede haber fallado por formato
-                    logger.info("GHunt reportó errores, posiblemente por formato de email.")
+                    # Esto podría ser porque GHunt no acepta el formato si no es estrictamente email
+                    logger.info("GHunt reportó errores posiblemente relacionados con formato de email.")
                 results.append(ghunt_result)
             except Exception as e:
                 logger.warning(f"Error con GHunt: {e}")
 
-        # Si no se encontró brecha en ninguna fuente y no es un formato válido, informar
-        if not results and not verify_email_format(normalized_email):
-            # Devolver respuesta que indica que no es email válido pero se pudo buscar
-            return {
-                "breached": False,
-                "breach_count": 0,
-                "source": "no_breach_found",
-                "confidence": 0.3,  # Menor confianza por no ser email estándar
-                "message": "No se encontraron brechas de seguridad (correo no válido)",
-                "query": normalized_email
-            }
-
-        # Si no se encontró brecha en ninguna fuente y es email válido
+        # Combinar los resultados (si hay alguno)
         if results:
             # Combinar los resultados
             overall_breached = any(r.get("breached", False) for r in results)
@@ -304,12 +326,27 @@ class EmailSearcher:
             return combined
         else:
             # No se encontraron brechas
-            return {
-                "breached": False,
-                "breach_count": 0,
-                "source": "no_breach_found",
-                "confidence": 0.5
-            }
+            # Devolver resultado con información de tipo de búsqueda hecho
+            if is_valid:
+                # Si fue email válido, se indica que no se encontró brecha
+                return {
+                    "breached": False,
+                    "breach_count": 0,
+                    "source": "no_breach_found",
+                    "confidence": 0.5,
+                    "message": "No se encontraron brechas de seguridad para este correo"
+                }
+            else:
+                # Si no era email válido, aún puede devolver datos de otras fuentes
+                # (pero esto es más difícil con HIBP y GHunt en la mayor parte de casos)
+                return {
+                    "breached": False,
+                    "breach_count": 0,
+                    "source": "no_breach_found",
+                    "confidence": 0.3,
+                    "message": "No se realizó búsqueda en bases de datos de brechas (dato no válido)",
+                    "query_type": "potencial_usuario_nombre" if not is_valid else "email_formato_valido"
+                }
 
     # ============================================================
     #        SERVICIOS EXTRAS: PASTE + VERIFICACIÓN

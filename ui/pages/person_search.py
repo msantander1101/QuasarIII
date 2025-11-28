@@ -50,16 +50,27 @@ def show_person_search_ui():
     search_sources = st.session_state.get("search_sources", ["people", "email", "social", "darkweb"])
     search_confidence = st.session_state.get("search_confidence", 0.7)
     search_relationship = st.session_state.get("search_relationship", "Todas")
-
+    search_username = st.session_state.get("search_username", "")
     # --- Panel de Búsqueda ---
     st.markdown("### 🔍 Criterios de Búsqueda Avanzada")
 
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        search_name = st.text_input("🔍 Nombre", key="search_name",
-                                    placeholder="Juan Pérez, María García",
-                                    help="Nombre completo de la persona")
+        search_name = st.text_input(
+            "🔍 Nombre",
+            key="search_name",
+            placeholder="Juan Pérez, María García",
+            help="Nombre completo de la persona"
+        )
+
+        search_username = st.text_input(
+            "👤 Username (opcional)",
+            key="search_username",
+            placeholder="Ej: miguel_santander, asciiSec, johnny1101",
+            help="Introduce un username para forzar SOCMINT con Maigret / Sherlock"
+        )
+
 
     with col2:
         search_email = st.text_input("✉️ Email", key="search_email",
@@ -75,6 +86,7 @@ def show_person_search_ui():
         search_phone = st.text_input("📱 Teléfono", key="search_phone",
                                      placeholder="+1-555-0123",
                                      help="Número de teléfono")
+
 
     # --- Filtros adicionales ---
     st.markdown("### 📜 Historial Histórico")
@@ -114,7 +126,8 @@ def show_person_search_ui():
 
     with col_filters[2]:
         relationship_options = ["Todas", "Colaborador", "Familiar", "Amigo", "Contacto"]
-        default_index = relationship_options.index(search_relationship) if search_relationship in relationship_options else 0
+        default_index = relationship_options.index(
+            search_relationship) if search_relationship in relationship_options else 0
 
         # Selectbox seguro con session_state
         search_relationship = st.selectbox(
@@ -141,7 +154,9 @@ def show_person_search_ui():
             if not query_input:
                 st.warning("⚠️ Por favor, introduce al menos un criterio de búsqueda.")
                 return
-
+            date_filter_enabled = False
+            date_start = None
+            date_end = None
             criteria = {
                 "query": query_input,
                 "name": search_name,
@@ -152,9 +167,11 @@ def show_person_search_ui():
                 "files": search_files,
                 "company": search_company,
                 "role": search_role,
+                "username": st.session_state.get("search_username") or None,
                 "date_range": {
-                    "start": str(search_date_start) if search_date_start else None,
-                    "end": str(search_date_end) if search_date_end else None
+                    "enabled": date_filter_enabled,
+                    "start": date_start,
+                    "end": date_end
                 }
             }
 
@@ -174,10 +191,17 @@ def show_person_search_ui():
                     # Dark web
                     darkweb_result = None
                     if "darkweb" in selected_sources:
-                        darkweb_result = search_dark_web_catalog(criteria["query"], search_type="catalog", max_results=50)
+                        darkweb_result = search_dark_web_catalog(criteria["query"], search_type="catalog",
+                                                                 max_results=50)
                         st.session_state['darkweb_results'] = darkweb_result
 
-                    search_results = search_multiple_sources(criteria["query"], selected_sources)
+                    username_for_search = st.session_state.get("search_username") or None
+
+                    search_results = search_multiple_sources(
+                        criteria["query"],
+                        selected_sources,
+                        username=username_for_search
+                    )
 
                     # Emails
                     email_results = []
@@ -185,14 +209,18 @@ def show_person_search_ui():
                     for person in people_results:
                         if isinstance(person, dict):  # ← solo procesar diccionarios
                             email = person.get('email')
-                            if email and '@' in email:
-                                try:
-                                    from modules.search.emailint import check_email_breach
-                                    breach_data = check_email_breach(email, st.session_state.get('current_user_id', 1))
-                                    if isinstance(breach_data, dict):
-                                        email_results.append(breach_data)
-                                except Exception as e:
-                                    logger.warning(f"Error verificando brecha de email para {email}: {e}")
+                            if email and '@' in email and '.' in email.split('@')[1]:
+                                # Verificación básica sin usar verify_email_format de forma estricta
+                                email_parts = email.split('@')
+                                if len(email_parts) == 2 and len(email_parts[1].split('.')) >= 2:
+                                    try:
+                                        from modules.search.emailint import check_email_breach
+                                        breach_data = check_email_breach(email,
+                                                                         st.session_state.get('current_user_id', 1))
+                                        if isinstance(breach_data, dict):
+                                            email_results.append(breach_data)
+                                    except Exception as e:
+                                        logger.warning(f"Error verificando brecha de email para {email}: {e}")
 
                     if email_results:
                         if 'email' not in search_results or not isinstance(search_results['email'], dict):
@@ -256,8 +284,128 @@ def show_person_search_ui():
 
     # Mostrar resultados si existen
     if 'search_results' in st.session_state and st.session_state['search_results']:
+        # Debug seguro de resultados (antes del renderizado de resultados)
+        st.markdown("---")
+        st.subheader("🧪 DEBUG: Verificación de Resultados")
+
+        # Verificar que los resultados existan antes de operar con ellos
+        results = st.session_state['search_results']
+        if results:
+            # Mostrar una vista de todo lo que hay en los resultados
+            if st.checkbox("Mostrar resultados completos (debug)", False):
+                st.json(results)
+
+            # Verificar especialmente si hay social_profiles
+            found_social_profiles = False
+            if 'people' in results and 'results' in results['people']:
+                people_results = results['people']['results']
+                # Verificar que sea lista antes de iterar
+                if isinstance(people_results, list):
+                    for person in people_results:
+                        if isinstance(person, dict) and 'social_profiles' in person:
+                            found_social_profiles = True
+                            st.info(
+                                f"🟢 **SOCIAL PROFILES ENCONTRADO** en persona: {person.get('name', 'Desconocido')}")
+                            st.json(person['social_profiles'])
+                else:
+                    # Si no es lista, intentamos mostrar el contenido como está
+                    if isinstance(people_results, dict):
+                        st.info("🔍 Datos de personas no en formato lista:")
+                        st.json(people_results)
+
+            if not found_social_profiles and 'people' in results:
+                # Verificar si hay datos de social_profiles en la estructura directa de 'people'
+                people_data = results['people']
+                if isinstance(people_data, dict):
+                    # Buscar estructuras que puedan tener social_profiles a nivel raíz
+                    st.info("🔍 Verificando si hay datos de sociales en estructura raíz de 'people'")
+                    st.json(people_data)
+
+            if not found_social_profiles:
+                st.info("🔍 No hay perfiles sociales detectados para mostrar")
+
         st.markdown("---")
         st.subheader("📊 Resultados de Búsqueda")
+        # ========== BLOQUE SOCMINT INTEGRADO ==========
+        if "social_profiles" in results and isinstance(results["social_profiles"], dict):
+            socmint_raw = results["social_profiles"]
+
+            # --- SANITIZADOR UNIVERSAL SOCMINT ---
+            if isinstance(socmint_raw, dict):
+                # Si ya es formato correcto → usarlo tal cual
+                socmint = socmint_raw.get("social_profiles", socmint_raw)
+            else:
+                # Si es string: lo envolvemos correctamente
+                socmint = {
+                    "error": str(socmint_raw)
+                }
+                if "error" in socmint:
+                    st.warning(f"⚠️ SOCMINT falló: {socmint['error']}")
+                    return
+
+            st.markdown("### 🌐 Perfiles Sociales (SOCMINT)")
+            st.markdown(
+                "<div style='background: linear-gradient(135deg, #3a7bd5, #004e92); padding: 12px; border-radius: 10px;'>"
+                "<h3 style='color:white; margin:0;'>🛰 Inteligencia de Perfiles Sociales</h3>"
+                "</div>",
+                unsafe_allow_html=True
+            )
+
+            # Mostrar herramientas (Maigret / Sherlock)
+            def normalize_socmint_value(v):
+                # Si ya es dict, perfecto
+                if isinstance(v, dict):
+                    return v
+
+                # Si es lista -> no es un error.
+                # El módulo SOCMINT devuelve:
+                # { "maigret": [ {username: result}, ... ] }
+                if isinstance(v, list):
+                    return {"results": v}
+
+                # Si es string, convertirlo en error
+                if isinstance(v, str):
+                    return {"error": v}
+
+                # Caso genérico
+                return {"error": "Formato desconocido en SOCMINT"}
+
+            # -------------------------
+            # Renderizado SOCMINT
+            # -------------------------
+            for tool_name, tool_data in socmint.items():
+
+                tool_data = normalize_socmint_value(tool_data)
+                display_name = tool_name.capitalize()
+
+                if tool_data.get("error"):
+                    st.warning(f"⚠️ {display_name}: {tool_data.get('error')}")
+                    continue
+
+                # Mostrar resultados reales
+                st.subheader(f"Resultados: {display_name}")
+                st.json(tool_data)
+
+                display_name = tool_name.capitalize()
+
+                if tool_data.get("error"):
+                    st.warning(f"⚠️ {display_name}: {tool_data.get('error')}")
+                    continue
+
+                # JSON estructurado
+                if tool_data.get("data"):
+                    st.markdown(f"#### 📊 {display_name} – Datos estructurados")
+                    st.json(tool_data["data"])
+
+                # Salida cruda
+                elif tool_data.get("raw_output"):
+                    st.markdown(f"#### 📄 {display_name} – Output sin procesar")
+                    raw = tool_data["raw_output"]
+                    raw_short = raw[:500] + "..." if len(raw) > 500 else raw
+                    st.code(raw_short)
+
+                else:
+                    st.info(f"ℹ️ {display_name}: Sin datos disponibles")
 
         results = st.session_state['search_results']
         total_count = 0
@@ -275,9 +423,112 @@ def show_person_search_ui():
                 # Personas
                 if source_type == 'people' and isinstance(source_results, dict) and 'results' in source_results:
                     st.markdown(f"### 👥 Resultados de Personas")
+
+                    # Procesamiento seguro: manejo de estructuras posiblemente no listas
                     person_results = source_results['results']
+
+                    # Asegurarse de que es lista (si no, puede ser estructura de herramientas)
+                    if isinstance(person_results, dict) and 'maigret' in person_results:
+                        # Es estructura de resultados de herramientas, no lista de personas
+                        # Creamos una entrada artificial para mostrar los resultados
+                        person_results = []
+                        st.info("💡 Información de personas recuperada indirectamente.")
+                        st.warning("⚠️ No hay personas listadas, pero se mostrarán los perfiles sociales.")
+                    elif not isinstance(person_results, list):
+                        # Si no es una lista, convertirlo en lista de uno
+                        if isinstance(person_results, dict):
+                            person_results = [person_results]
+                        else:
+                            person_results = []
+
+                    # Verificar que sea lista antes de iterar
+                    if not isinstance(person_results, list):
+                        person_results = []
+
                     total_count += len(person_results)
 
+                    # Mostrar si hay una persona artificial con perfiles sociales
+                    if not person_results:  # Esto aplica para casos en donde solo están los perfiles
+                        # Mostrar los resultados directos de maigret/sherlock como datos de perfil
+                        if isinstance(source_results['results'], dict):
+                            maigret_data = source_results['results'].get('maigret', {})
+                            sherlock_data = source_results['results'].get('sherlock', {})
+
+                            # Mostrar resultados de Maigret y Sherlock con formato bonito
+                            st.markdown("### 🌐 Perfiles Sociales (Maigret y Sherlock)")
+
+                            # Mostrar errores con estilo profesional
+                            if maigret_data.get('raw_output') or sherlock_data.get('raw_output'):
+
+                                # Si hay errores, los mostramos claramente
+                                if maigret_data.get('raw_output'):
+                                    # Limitar longitud para evitar sobre carga
+                                    error_text = maigret_data['raw_output'][:500] + "..." if len(
+                                        maigret_data['raw_output']) > 500 else maigret_data['raw_output']
+
+                                    st.markdown(f"""
+                                    <div style="background: #2d1b69; border: 1px solid #4b2e9d; border-radius: 12px; 
+                                               padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                                        <h4 style="margin: 0; color: #e0e0ff; font-size: 18px;">
+                                            🛠️ Maigret <span style="color: #ff6b6b; font-size: 14px;">(Error Técnico)</span>
+                                        </h4>
+                                        <div style="background: #1a1a2e; border-radius: 8px; padding: 12px; margin-top: 10px; overflow-x: auto; max-height: 150px; overflow-y: auto;">
+                                            <pre style="color: #ff9999; font-size: 12px; margin: 0;">{error_text}</pre>
+                                        </div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+
+                                if sherlock_data.get('raw_output'):
+                                    error_text = sherlock_data['raw_output'][:500] + "..." if len(
+                                        sherlock_data['raw_output']) > 500 else sherlock_data['raw_output']
+                                    st.markdown(f"""
+                                    <div style="background: #2d1b69; border: 1px solid #4b2e9d; border-radius: 12px; 
+                                               padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                                        <h4 style="margin: 0; color: #e0e0ff; font-size: 18px;">
+                                            🔍 Sherlock <span style="color: #ff6b6b; font-size: 14px;">(Error Técnico)</span>
+                                        </h4>
+                                        <div style="background: #1a1a2e; border-radius: 8px; padding: 12px; margin-top: 10px; overflow-x: auto; max-height: 150px; overflow-y: auto;">
+                                            <pre style="color: #ff9999; font-size: 12px; margin: 0;">{error_text}</pre>
+                                        </div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+
+                            # Mostrar datos estructurados cuando existan
+                            else:
+                                # Mostrar resultados con formato bonito si hay datos válidos
+                                if maigret_data.get('data'):
+                                    data_json = json.dumps(maigret_data['data'], indent=2, ensure_ascii=False)
+                                    # Evitamos f-strings que causaban errores
+                                    st.markdown(f"""
+                                    <div style="background: #1a2d1a; border: 1px solid #2e7d32; border-radius: 12px; 
+                                               padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                                        <h4 style="margin: 0; color: #a5d6a7; font-size: 18px;">
+                                            📊 Maigret <span style="color: #4caf50; font-size: 14px;">(Resultados Estructurados)</span>
+                                        </h4>
+                                        <div style="margin-top: 10px;">
+                                            <pre style="color: #a5d6a7; font-size: 13px; margin: 0; white-space: pre-wrap;">
+{data_json}</pre>
+                                        </div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+
+                                if sherlock_data.get('data'):
+                                    data_json = json.dumps(sherlock_data['data'], indent=2, ensure_ascii=False)
+                                    # Evitamos f-strings
+                                    st.markdown(f"""
+                                    <div style="background: #1a2d1a; border: 1px solid #2e7d32; border-radius: 12px; 
+                                               padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                                        <h4 style="margin: 0; color: #a5d6a7; font-size: 18px;">
+                                            🔍 Sherlock <span style="color: #4caf50; font-size: 14px;">(Resultados Estructurados)</span>
+                                        </h4>
+                                        <div style="margin-top: 10px;">
+                                            <pre style="color: #a5d6a7; font-size: 13px; margin: 0; white-space: pre-wrap;">
+{data_json}</pre>
+                                        </div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+
+                    # Bucle normal de personas (solo si hay lista)
                     for i, person in enumerate(person_results):
                         if isinstance(person, dict) and 'name' in person:
                             person_name = person.get('name', 'Nombre desconocido')
@@ -286,37 +537,37 @@ def show_person_search_ui():
                             person_location = person.get('location', 'N/A')
                             person_confidence = person.get('confidence', 0.8)
 
-                            # Extraer otros datos disponibles
-                            other_fields = []
-                            for key, value in person.items():
-                                if key not in ['name', 'email', 'phone', 'location', 'confidence']:
-                                    other_fields.append(
-                                        f"<p style='color: #b0b0c0; margin: 3px 0; font-size: 13px;'><strong>{key.title()}:</strong> {value}</p>")
-
+                            # Generar tarjeta de persona con estilo mejorado
                             person_card = f"""
                             <div style="background: #1e1e2e; border: 1px solid #3a3a4c; border-radius: 12px; 
-                                       padding: 20px; margin-bottom: 15px; box-shadow: 0 3px 10px rgba(0,0,0,0.5);">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                       padding: 20px; margin-bottom: 20px; box-shadow: 0 6px 15px rgba(0,0,0,0.4); border-left: 4px solid #4a90e2;">
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
                                     <div>
-                                        <h3 style="margin: 0; color: #ffffff; font-size: 20px;">{person_name}</h3>
-                                        <p style="color: #b0b0c0; margin: 8px 0; font-size: 14px;">
-                                            <strong>Email:</strong> {person_email}<br/>
-                                            <strong>Teléfono:</strong> {person_phone}<br/>
-                                            <strong>Ubicación:</strong> {person_location}
-                                        </p>
-                                        {" ".join(other_fields)}
+                                        <h3 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 600;">{person_name}</h3>
+                                        <div style="margin-top: 12px;">
+                                            <p style="color: #b0b0c0; margin: 6px 0; font-size: 15px;">
+                                                <strong>📧 Email:</strong> {person_email}
+                                            </p>
+                                            <p style="color: #b0b0c0; margin: 6px 0; font-size: 15px;">
+                                                <strong>📱 Teléfono:</strong> {person_phone}
+                                            </p>
+                                            <p style="color: #b0b0c0; margin: 6px 0; font-size: 15px;">
+                                                <strong>📍 Ubicación:</strong> {person_location}
+                                            </p>
+                                        </div>
                                     </div>
                                     <div style="text-align: right;">
-                                        <span style="display: block; background: #28a745; color: white; 
-                                                   padding: 5px 15px; border-radius: 15px; font-size: 14px;">
+                                        <span style="display: block; background: linear-gradient(135deg, #4a90e2, #6a11cb); color: white; 
+                                                   padding: 8px 18px; border-radius: 20px; font-size: 16px; font-weight: 600; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">
                                             ⭐ {person_confidence:.2f}
                                         </span>
                                     </div>
                                 </div>
-                                <div style="display: flex; gap: 10px;">
+                                <div style="display: flex; gap: 12px; margin-top: 15px;">
                                     <button onclick="handleSavePerson('{json.dumps(person).replace(chr(34), '&quot;')}')" 
-                                            style="background: #28a745; color: white; border: none; padding: 8px 15px; 
-                                                   border-radius: 6px; cursor: pointer; font-size: 14px;" 
+                                            style="background: linear-gradient(135deg, #28a745, #1e7e34); color: white; border: none; 
+                                                   padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 500; 
+                                                   box-shadow: 0 3px 8px rgba(0,0,0,0.2); transition: transform 0.2s;"
                                             class="save-btn-{i}">
                                         ✅ Guardar Persona
                                     </button>
@@ -325,31 +576,93 @@ def show_person_search_ui():
                             """
                             st.markdown(person_card, unsafe_allow_html=True)
 
-                    # Mostrar resultados de perfiles sociales (Maigret/Sherlock) si existen
-                    for item in person_results:
-                        if isinstance(item, dict) and 'social_profiles' in item:
-                            social_profiles = item.get('social_profiles', {})
-                            if social_profiles:
-                                st.markdown("### 🌐 Perfiles Sociales (Maigret y Sherlock)")
-                                for tool_name, result_data in social_profiles.items():
-                                    display_name = tool_name.capitalize()
-                                    if isinstance(result_data, dict):
+                            # Mostrar resultados de perfiles sociales si existen
+                            if 'social_profiles' in person and person['social_profiles']:
+                                social_profiles = person['social_profiles']
+                                if social_profiles:
+                                    st.markdown("### 🌐 Perfiles Sociales Integrados")
+                                    st.markdown(
+                                        "<div style='background: linear-gradient(135deg, #3a7bd5, #004e92); padding: 15px; border-radius: 12px; margin-bottom: 20px;'>"
+                                        "<h3 style='margin: 0; color: white; font-size: 20px;'>🔍 Información Sociales Adicional</h3>"
+                                        "</div>", unsafe_allow_html=True)
+
+                                    # Mostrar cada perfil con estilo
+                                    for tool_name, result_data in social_profiles.items():
+                                        display_name = tool_name.capitalize()
                                         if 'error' in result_data:
-                                            st.warning(f"{display_name}: {result_data['error']}")
-                                        elif 'warning' in result_data:
-                                            st.info(f"{display_name}: {result_data['warning']}")
+                                            st.markdown(f"""
+                                            <div style="background: #2d1b69; border: 1px solid #4b2e9d; border-radius: 12px; 
+                                                       padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                                                <h4 style="margin: 0; color: #e0e0ff; font-size: 16px;">
+                                                    {display_name} <span style="color: #ff6b6b; font-size: 13px;">(Error)</span>
+                                                </h4>
+                                                <p style="color: #b0b0c0; margin: 10px 0 0 0; font-size: 14px;">
+                                                    {result_data['error']}
+                                                </p>
+                                            </div>
+                                            """, unsafe_allow_html=True)
                                         else:
-                                            st.markdown(f"#### {display_name} Resultados")
-                                            if 'data' in result_data:  # Datos estructurados
-                                                st.json(result_data['data'])
-                                            elif 'raw_output' in result_data:  # Salida cruda
-                                                st.markdown(f"Raw output: `{result_data['raw_output'][:200]}...`")
+                                            # Para mostrar datos estructurados
+                                            if 'data' in result_data and result_data['data']:
+                                                try:
+                                                    data_json = json.dumps(result_data['data'], indent=2,
+                                                                           ensure_ascii=False)
+                                                    # Ajustar para evitar f-strings problematicos
+                                                    st.markdown(f"""
+                                                    <div style="background: #1a2d1a; border: 1px solid #2e7d32; border-radius: 12px; 
+                                                               padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                                                        <h4 style="margin: 0; color: #a5d6a7; font-size: 16px;">
+                                                            {display_name} <span style="color: #4caf50; font-size: 13px;">(Datos Estructurados)</span>
+                                                        </h4>
+                                                        <div style="background: #1a1a2e; border-radius: 8px; padding: 12px; margin-top: 10px; max-height: 250px; overflow-y: auto;">
+                                                            <pre style="color: #a5d6a7; font-size: 12px; margin: 0; white-space: pre-wrap;">
+{data_json}</pre>
+                                                        </div>
+                                                    </div>
+                                                    """, unsafe_allow_html=True)
+                                                except Exception as e:
+                                                    # Manejar caso simple sin f-strings
+                                                    st.markdown(f"""
+                                                    <div style="background: #1e1e2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                                               padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                                                        <h4 style="margin: 0; color: #e0e0ff; font-size: 16px;">
+                                                            {display_name} <span style="color: #4b5563; font-size: 13px;">(Datos sin procesar)</span>
+                                                        </h4>
+                                                        <div style="background: #1a1a2e; border-radius: 8px; padding: 12px; margin-top: 10px;">
+                                                            <pre style="color: #b0b0c0; font-size: 12px; margin: 0;">{str(result_data.get('data', 'Sin datos'))}</pre>
+                                                        </div>
+                                                    </div>
+                                                    """, unsafe_allow_html=True)
+
+                                            elif 'raw_output' in result_data and result_data['raw_output']:
+                                                raw_data = result_data['raw_output']
+                                                if len(raw_data) > 300:
+                                                    raw_data_preview = raw_data[:300] + "..."
+                                                else:
+                                                    raw_data_preview = raw_data
+                                                st.markdown(f"""
+                                                <div style="background: #1e1e2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                                           padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                                                    <h4 style="margin: 0; color: #e0e0ff; font-size: 16px;">
+                                                        {display_name} <span style="color: #ffa500; font-size: 13px;">(Salida Cruda)</span>
+                                                    </h4>
+                                                    <div style="background: #1a1a2e; border-radius: 8px; padding: 12px; margin-top: 10px; max-height: 200px; overflow-y: auto;">
+                                                        <pre style="color: #b0b0c0; font-size: 11px; margin: 0;">{raw_data_preview}</pre>
+                                                    </div>
+                                                </div>
+                                                """, unsafe_allow_html=True)
                                             else:
-                                                st.json(result_data)  # Fallback JSON
-                                    else:
-                                        st.markdown(f"#### {display_name} Resultados")
-                                        st.json(result_data)
-                            break
+                                                st.markdown(f"""
+                                                <div style="background: #1e1e2e; border: 1px solid #3a3a4c; border-radius: 12px; 
+                                                           padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+                                                    <h4 style="margin: 0; color: #e0e0ff; font-size: 16px;">
+                                                        {display_name}
+                                                    </h4>
+                                                    <div style="margin-top: 10px; color: #b0b0c0;">
+                                                        <pre style="font-size: 13px; margin: 0; white-space: pre-wrap;">{json.dumps(result_data, indent=2, ensure_ascii=False)}</pre>
+                                                    </div>
+                                                </div>
+                                                """, unsafe_allow_html=True)
 
                 # Emails
                 elif source_type == 'email' and isinstance(source_results, dict) and 'results' in source_results:
@@ -974,7 +1287,7 @@ def show_person_search_ui():
         st.markdown("### 🔐 Recomendaciones de Seguridad")
         st.info("""
         - Asegúrate de tener Tor corriendo en tu máquina (127.0.0.1:9050)continua por favor
-        
+
         - Usa claves API con acceso mínimo
         - Analiza datos sensibles en entornos anónimos
         - Cambia tu identidad de Tor periódicamente para mantener privacidad

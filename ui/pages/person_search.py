@@ -16,6 +16,121 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# =============================
+# 🎨 Enhanced Google Account Renderer with Interactive Features
+# =============================
+
+# =============================
+# 🎨 Enhanced Google Account Renderer with Interactive Features
+# =============================
+
+def render_google_account_details(ghunt_data):
+    """
+    Renderiza detalles de cuenta Google como tarjeta dentro del UI de Streamlit.
+    Incluye imagen de perfil si está disponible y botones interactivos.
+    """
+    if not isinstance(ghunt_data, dict):
+        st.warning("⚠️ Datos de GHunt no disponibles o inválidos.")
+        return
+
+    # Acceder a la estructura correcta
+    data = ghunt_data.get("data", {})
+    raw_data = ghunt_data.get("raw_data", {})  # Para el caso de datos brutos
+
+    # Intentar encontrar información del perfil en múltiples posiciones
+    person = data.get("person", {})
+    if not person:
+        person = data.get("people", [{}])[0] if isinstance(data.get("people"), list) and len(data.get("people", [])) > 0 else {}
+    if not person:
+        person = raw_data.get("person", {})
+    if not person:
+        person = data.get("profile", {})
+
+    # Extraer todos los datos posibles con fallbacks
+    email = person.get('primary_email', person.get('email', person.get('primaryEmail', 'N/A')))
+    gaia_id = person.get('gaia_id', person.get('gaiaId', 'N/A'))
+    user_type = person.get('user_type', person.get('userType', 'N/A'))
+    services = person.get('services', person.get('activated_services', []))
+    last_edit = person.get('last_modified', person.get('lastEdited', 'N/A'))
+    profile_pic_url = person.get('profile_picture_url', person.get('profilePic', '')).strip()
+
+    # Limpiar los servicios
+    service_list = ', '.join(services) if isinstance(services, list) else str(services) if services else 'Ninguno'
+
+    # Comprobar si la imagen es válida
+    has_profile_pic = bool(profile_pic_url and profile_pic_url.startswith(('http://', 'https://')))
+
+    # Crear ID único para componentes interactivos
+    unique_id = f"gaia_{gaia_id.replace('-', '_').replace('.', '_')}" if gaia_id != 'N/A' else "gaia_unknown"
+
+    # Función JavaScript para copiar al portapapeles
+    copy_js = f"""
+    <script>
+    function copyToClipboard(text) {{
+        navigator.clipboard.writeText(text).then(() => {{
+            const btn = document.getElementById('{unique_id}_copy_btn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '✅ Copiado!';
+            setTimeout(() => {{
+                btn.innerHTML = originalText;
+            }}, 2000);
+        }});
+    }}
+    </script>
+    """
+
+    # Botón copiar Gaia ID
+    copy_button_html = f"""
+    <button onclick="copyToClipboard('{gaia_id}')" 
+            id="{unique_id}_copy_btn"
+            style="background: #28a745; color: white; border: none; 
+                   padding: 5px 10px; border-radius: 5px; font-size: 12px; 
+                   cursor: pointer; margin-left: 5px;"
+            title="Copiar Gaia ID">
+        📋 Copiar ID
+    </button>
+    """
+
+    # Construir HTML con o sin imagen
+    if has_profile_pic:
+        image_html = f"""
+        <div style="float: left; margin-right: 20px; margin-bottom: 20px;">
+            <img src="{profile_pic_url}" alt="Foto de perfil" 
+                 style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 2px solid #3a7bd5;">
+        </div>
+        """
+        info_html = f"""
+        <div style="overflow: hidden;">
+        """
+    else:
+        image_html = ""
+        info_html = """
+        <div>
+        """
+
+    # Crear el código HTML completo
+    details_html = f"""
+    {copy_js}
+    <div style="background: linear-gradient(135deg, #3a7bd5, #004e92);
+                padding: 20px; border-radius: 12px; margin: 15px 0; box-shadow: 0 5px 15px rgba(0,0,0,0.2);">
+        <h3 style="color:white; margin: 0; font-size: 20px;">🔍 Información de Google Account</h3>
+        {image_html}
+        {info_html}
+            <table style="width:100%; color:white; border-collapse: collapse; margin-top:10px;">
+              <tr><td style='padding:5px 8px; width:30%;'>📧 Email:</td><td style='padding:5px 8px;'>{email}</td></tr>
+              <tr><td style='padding:5px 8px;'>🆔 Gaia ID:</td><td style='padding:5px 8px;'>{gaia_id} {copy_button_html if gaia_id != 'N/A' else ''}</td></tr>
+              <tr><td style='padding:5px 8px;'>👤 Tipo de usuario:</td><td style='padding:5px 8px;'>{user_type}</td></tr>
+              <tr><td style='padding:5px 8px;'>🔧 Servicios activos:</td><td style='padding:5px 8px;'>{service_list or 'Ninguno'}</td></tr>
+              <tr><td style='padding:5px 8px;'>🕒 Última edición:</td><td style='padding:5px 8px;'>{last_edit}</td></tr>
+            </table>
+        </div>
+    </div>
+    """
+
+    st.markdown(details_html, unsafe_allow_html=True)
+# =============================
+# 🧾 Rest of the person_search.py Content Below (unchanged)
+# =============================
 
 def show_person_search_ui():
     """
@@ -611,15 +726,15 @@ def show_person_search_ui():
                                                     st.markdown(f"""
                                                     <div style="background: #1a2d1a; border: 1px solid #2e7d32; border-radius: 12px; 
                                                                padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
-                                                        <h4 style="margin: 0; color: #a5d6a7; font-size: 16px;">
-                                                            {display_name} <span style="color: #4caf50; font-size: 13px;">(Datos Estructurados)</span>
-                                                        </h4>
-                                                        <div style="background: #1a1a2e; border-radius: 8px; padding: 12px; margin-top: 10px; max-height: 250px; overflow-y: auto;">
-                                                            <pre style="color: #a5d6a7; font-size: 12px; margin: 0; white-space: pre-wrap;">
+                                                                                                        <h4 style="margin: 0; color: #a5d6a7; font-size: 16px;">
+                                                                {display_name} <span style="color: #4caf50; font-size: 13px;">(Datos Estructurados)</span>
+                                                            </h4>
+                                                            <div style="background: #1a1a2e; border-radius: 8px; padding: 12px; margin-top: 10px; max-height: 250px; overflow-y: auto;">
+                                                                <pre style="color: #a5d6a7; font-size: 12px; margin: 0; white-space: pre-wrap;">
 {data_json}</pre>
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                    """, unsafe_allow_html=True)
+                                                        """, unsafe_allow_html=True)
                                                 except Exception as e:
                                                     # Manejar caso simple sin f-strings
                                                     st.markdown(f"""
@@ -1096,6 +1211,11 @@ def show_person_search_ui():
                                                 <p style="color: #28a745; font-size: 14px; font-weight: bold;">✅ GHunt completó su análisis</p>
                                             </div>
                                             """, unsafe_allow_html=True)
+
+                                # MOSTRAR LA INFORMACIÓN ENRIQUECIDA DE GOOGLE ACCOUNT
+                                st.markdown("### 📊 Vista Detallada - Google Account")
+                                render_google_account_details(ghunt_result)
+
                             else:
                                 # Aquí mostramos mensajes específicos basados en el tipo de error
                                 error_msg = ghunt_result.get('error', '')
@@ -1203,7 +1323,7 @@ def show_person_search_ui():
                         with st.expander(f"📄 {result['title']} ({result['source']})", expanded=False):
                             st.markdown(f"""
                             <div style="background: #1a1a2e; border: 1px solid #3a3a4c; border-radius: 12px; 
-                                       padding: 15px; color: #e6e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                                       padding: 15px; color: #e6fa; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
                                 <h5 style="margin: 0; color: #ffffff;">{result['title']}</h5>
                                 <p style="color: #b0b0c0; font-size: 14px;">
                                     <strong>Fecha:</strong> {result.get('date', 'Desconocida')}<br/>

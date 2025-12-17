@@ -1,50 +1,48 @@
 import streamlit as st
-import os, sys
+import os
+import sys
 
-# Agregar el directorio raiz a path para poder importar core, modules, y utils
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# -------------------------------------------------
+# Path raíz del proyecto
+# -------------------------------------------------
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
 
-# Importar desde core
-from core.auth_manager import register_user, authenticate_user
+# -------------------------------------------------
+# Core
+# -------------------------------------------------
 from core.db_manager import create_db
 from core.config_manager import config_manager
-from modules.ai.intelligence_core import ai_analyzer, initialize_ai_analyzer
+from modules.ai.intelligence_core import initialize_ai_analyzer
 
-# Importar páginas de UI
+# -------------------------------------------------
+# UI Pages
+# -------------------------------------------------
 from ui.pages.login import show_login_with_tabs
-from ui.pages.register import show_register_page
 from ui.pages.dashboard import show_dashboard
 from ui.pages.person_search import show_person_search_ui
 from ui.pages.graph_visualization import show_graph_visualization
 from ui.pages.settings import show_settings_page
 from ui.pages.report_generation import show_report_generation_page
 
-# Importa helpers y utilidades
-from ui.utils.helpers import get_current_user_id, set_current_user_id, clear_session
-
-from modules.search.darkweb import (
-    search_dark_web_catalog,
-    search_paste_content,
-    search_documents,
-    search_marketplaces,
-    get_available_onion_search_engines,
-    check_onion_connectivity,
-    get_darkweb_stats
-)
-# Importar desde socmint
-from modules.search.socmint.socmint import search_social_profiles
-
-# Importa el logger
+# -------------------------------------------------
+# Utils
+# -------------------------------------------------
+from ui.utils.helpers import clear_session
 from utils.logger import setup_logger
 
 logger = setup_logger()
 
-def main():
-    logger.info("Iniciando aplicación Streamlit - Quasar III OSINT Suite")
 
-    # Configurar la página con un estado inicial de sidebar colapsado.  Esto
-    # complementa la opción `showSidebarNavigation` en `.streamlit/config.toml`
-    # para garantizar que la navegación por defecto de Streamlit no se muestre.
+# =================================================
+# MAIN
+# =================================================
+def main():
+    logger.info("Arrancando Quasar III OSINT Suite")
+
+    # -------------------------------------------------
+    # Streamlit config
+    # -------------------------------------------------
     st.set_page_config(
         page_title="Quasar III OSINT Suite",
         page_icon="🕵️‍♂️",
@@ -52,73 +50,79 @@ def main():
         initial_sidebar_state="collapsed"
     )
 
-    # Asegura que la BD está creada
+    # -------------------------------------------------
+    # DB init
+    # -------------------------------------------------
     create_db()
 
-    # --- Estado de sesión ---
-    # Usamos valores por defecto si no existen
-    if 'authenticated' not in st.session_state:
-        st.session_state['authenticated'] = False
-        st.session_state['current_user'] = {}
-        st.session_state['current_user_id'] = None
-        st.session_state['page'] = 'dashboard' # Pagina inicial
-        st.session_state['force_reload'] = False # Flag para forzar recarga
-        st.session_state['search_results'] = None # Resultados temporales de búsqueda
-        st.session_state['search_count'] = 0 # Contador de búsquedas
-        st.session_state['current_timestamp'] = None # Timestamp para reportes
-        st.session_state['active_tab'] = 'login' # Para manejar pestañas
+    # -------------------------------------------------
+    # Session state defaults
+    # -------------------------------------------------
+    defaults = {
+        "authenticated": False,
+        "current_user": {},
+        "current_user_id": None,
+        "page": "dashboard",
+        "search_results": None,
+        "search_count": 0,
+        "current_timestamp": None,
+        "active_tab": "login",
+    }
 
-    # Inicializa contadores
-    if 'current_timestamp' not in st.session_state:
-        st.session_state['current_timestamp'] = st.session_state.get('current_timestamp', '')
+    for k, v in defaults.items():
+        st.session_state.setdefault(k, v)
 
-    # --- Inicializar IA si el usuario ha iniciado sesión ---
-    if st.session_state.get('authenticated', False):
-        user_id = st.session_state.get('current_user_id')
+    # -------------------------------------------------
+    # Initialize AI (if logged in)
+    # -------------------------------------------------
+    if st.session_state["authenticated"]:
+        user_id = st.session_state.get("current_user_id")
         if user_id:
-            # Verificar si se tiene la clave API para cargar IA
             api_key = config_manager.get_config(user_id, "openai_api_key")
-            if api_key:
-                initialize_ai_analyzer(api_key)
-                logger.info("IA iniciada con clave proporcionada para usuario")
-            else:
-                initialize_ai_analyzer(None)
+            initialize_ai_analyzer(api_key)
+            logger.info("IA inicializada")
 
-    # Mostrar contenido principal (sin sidebar).  Establecemos un fondo más
-    # oscuro con un degradado en tonos azules profundos para que la información
-    # destaque mejor y la aplicación tenga un aspecto más profesional.  Además
-    # ocultamos el menú principal y el pie de página de Streamlit.
+    # -------------------------------------------------
+    # Global styles
+    # -------------------------------------------------
     st.markdown("""
         <style>
         .stApp {
-            background: linear-gradient(135deg, #0a192f 0%, #274472 100%) !important;
+            background: linear-gradient(135deg, #0a192f 0%, #274472 100%);
         }
         MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         </style>
     """, unsafe_allow_html=True)
 
-    # Logueo condicional: Decide qué mostrar
-    if st.session_state.get('authenticated', False):
-        logger.info(f"Sesión activa. Usuario identificado: { st.session_state.get('current_user', {}).get('username', 'Desconocido') }")
-        page = st.session_state.get('page', 'dashboard')
+    # -------------------------------------------------
+    # Routing
+    # -------------------------------------------------
+    if st.session_state["authenticated"]:
+        page = st.session_state.get("page", "dashboard")
+        logger.info(f"Sesión activa | Página: {page}")
 
-        # Navegación basada en estado
-        if page == 'person_search':
-            show_person_search_ui() # Mostrar el panel de búsqueda avanzada
-        elif page == 'graph_visualization':
-            show_graph_visualization() # Mostrar el panel de visualización del grafo
-        elif page == 'settings': # Nueva página de config
+        if page == "person_search":
+            show_person_search_ui()
+
+        elif page == "graph_visualization":
+            show_graph_visualization()
+
+        elif page == "settings":
             show_settings_page()
-        elif page == 'report_generation': # Nueva página de reportes
+
+        elif page == "report_generation":
             show_report_generation_page()
+
         else:
-            # Por defecto, muestra el dashboard
             show_dashboard()
+
     else:
-        # Mostrar el login con pestañas directamente
         show_login_with_tabs()
 
-# Código de ejecución principal de Streamlit
+
+# -------------------------------------------------
+# Entry point
+# -------------------------------------------------
 if __name__ == "__main__":
     main()

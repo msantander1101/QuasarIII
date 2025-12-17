@@ -1,344 +1,139 @@
 # modules/search/pastesearch.py
+"""
+Paste & Leak Search — MANUAL ONLY
+Este módulo:
+- NO se ejecuta automáticamente
+- NO depende de Streamlit
+- SOLO se llama bajo acción explícita del usuario
 
+Fuentes:
+- HIBP (breaches, solo email)
+- GitHub Gist
+- Google Site Search (básico)
 """
-Búsqueda real de información de paste y leaks usando APIs reales
-- Usa Have I Been Pwned (breaches)
-- Usa GitHub Gist (búsqueda pública de pastes)
-- Usa Leakatlas.com y Google Site Search para sitios de paste
-"""
+
 import logging
 import requests
 import time
 import re
 from typing import List, Dict, Any
-from urllib.parse import quote_plus, urlencode
+from urllib.parse import quote_plus
+
 from core.config_manager import config_manager
-import streamlit as st
 
 logger = logging.getLogger(__name__)
 
-# Configuración de fuentes
 HIBP_BASE_URL = "https://haveibeenpwned.com/api/v3/breachedaccount"
-GITHUB_GIST_URL = "https://api.github.com/gists"
-LEAKATLAS_URL = "https://leakatlas.com/search"
 
-# Constantes de configuración
-DELAY_BETWEEN_REQUESTS = 1.0  # Para evitar sobrecarga
-MAX_RETRIES = 3
+EMAIL_RE = re.compile(r'^[^@]+@[^@]+\.[^@]+$')
+TIMEOUT = 10
+MAX_RESULTS = 10
 
 
-def search_paste_sites(query: str, pastebin_api_key: str = None) -> List[Dict[str, Any]]:
+# ---------------------------------------------------------
+# ENTRY POINT (MANUAL)
+# ---------------------------------------------------------
+
+def search_pastes(query: str, user_id: int) -> List[Dict[str, Any]]:
     """
-    Búsqueda real en fuentes de paste (usando HIBP, GitHub Gist, Leakatlas.com, y Google Site Search)
-    Solo busca en HIBP si se proporciona un correo electrónico válido.
+    Ejecuta búsqueda de pastes SOLO bajo llamada explícita.
     """
-    logger.info(f"Buscando paste por: {query}")
+    results: List[Dict[str, Any]] = []
 
-    results = []
+    if not query or len(query.strip()) < 4:
+        return results
+
+    query = query.strip()
+
+    # 1️⃣ HIBP (solo email)
+    if EMAIL_RE.match(query):
+        results.extend(_search_hibp(query, user_id))
+
+    # 2️⃣ GitHub Gist
+    results.extend(_search_github_gist(query))
+
+    # 3️⃣ Google Site Search (ligero)
+    results.extend(_search_google_site(query))
+
+    return results[:MAX_RESULTS]
+
+
+# ---------------------------------------------------------
+# HIBP
+# ---------------------------------------------------------
+
+def _search_hibp(email: str, user_id: int) -> List[Dict[str, Any]]:
+    hibp_key = config_manager.get_config(user_id, "hibp")
+    if not hibp_key:
+        return []
+
+    headers = {
+        "x-apikey": hibp_key,
+        "User-Agent": "QuasarIII-PasteSearch/1.0"
+    }
+
     try:
-        # ✅ Usar el user_id del usuario actual, no None
-        user_id = st.session_state.get('current_user_id')
-        if not user_id:
-            logger.warning("No se encontró user_id. No se puede buscar en HIBP.")
-            return []
+        url = f"{HIBP_BASE_URL}/{quote_plus(email.lower())}"
+        r = requests.get(url, headers=headers, timeout=TIMEOUT)
 
-        hibp_key = config_manager.get_config(user_id, "hibp")  # ✅ Clave del usuario
-
-        # Verificar si la consulta es un correo electrónico válido
-        is_email = bool(re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', query.strip()))
-
-        # 1. Buscar en HIBP (breaches de contraseñas, correos) - SOLO SI ES UN EMAIL
-        if hibp_key and is_email:
-            query_hash = quote_plus(query.lower().strip())
-            url = f"{HIBP_BASE_URL}/{query_hash}"
-            headers = {
-                "x-apikey": hibp_key,
-                "User-Agent": "QuasarIII/1.0"
-            }
-
-            for attempt in range(MAX_RETRIES):
-                try:
-                    response = requests.get(url, headers=headers, timeout=10)
-                    if response.status_code == 200:
-                        data = response.json()
-                        if data:
-                            for breach in data:
-                                results.append({
-                                    "title": f"Brecha de {breach.get('Name', 'Incidente')}",
-                                    "url": breach.get("Link"),
-                                    "date": breach.get("Date"),
-                                    "size": f"{breach.get('Breach', 0):,} usuarios",
-                                    "language": breach.get("Type", "Credentials"),
-                                    "source": "HaveIBeenPwned",
-                                    "type": "breach",
-                                    "tags": ["credentials", "passwords", "email"]
-                                })
-                        break
-                    elif response.status_code == 401:
-                        logger.warning("HIBP: Clave API inválida o no autorizada")
-                        break
-                    elif response.status_code == 404:
-                        # No se encontraron brechas para ese email
-                        logger.info("HIBP: No se encontraron brechas para este correo")
-                        break
-                    else:
-                        logger.warning(f"HIBP error: {response.status_code}")
-                        if attempt < MAX_RETRIES - 1:
-                            time.sleep(DELAY_BETWEEN_REQUESTS)
-                except Exception as e:
-                    logger.error(f"HIBP request failed: {e}")
-                    if attempt < MAX_RETRIES - 1:
-                        time.sleep(DELAY_BETWEEN_REQUESTS)
-        elif not is_email:
-            logger.info("Consulta no es un correo electrónico válido. Omitiendo búsqueda en HIBP.")
-        else:
-            logger.warning("Clave HIBP no configurada para este usuario. No se puede buscar en breaches.")
-
-        # 2. Buscar en GitHub Gist (siempre, sin filtro de email)
-        # Solo buscar si query es suficientemente largo
-        if len(query.strip()) > 3:
-            gists = search_gist_by_keyword(query)
-            if gists:
-                for gist in gists:
-                    # Ajustar estructura para manejar posibles tipos de datos
-                    if isinstance(gist, dict):
-                        results.append({
-                            "title": gist.get("description", gist.get("files", {}).get("raw", "Sin título")),
-                            "url": gist.get("html_url"),
-                            "date": gist.get("created_at"),
-                            "size": f"{gist.get('files', {}).get('size', 0)} KB",
-                            "language": gist.get("files", {}).get("raw", {}).get("language", "Text"),
-                            "source": "GitHub Gist",
-                            "type": "gist",
-                            "tags": ["code", "paste", "leak"]
-                        })
-                    elif isinstance(gist, list):
-                        for item in gist:
-                            if isinstance(item, dict):
-                                results.append({
-                                    "title": item.get("description", item.get("files", {}).get("raw", "Sin título")),
-                                    "url": item.get("html_url"),
-                                    "date": item.get("created_at"),
-                                    "size": f"{item.get('files', {}).get('size', 0)} KB",
-                                    "language": item.get("files", {}).get("raw", {}).get("language", "Text"),
-                                    "source": "GitHub Gist",
-                                    "type": "gist",
-                                    "tags": ["code", "paste", "leak"]
-                                })
-
-        # 3. Buscar en Leakatlas.com (siempre, sin filtro de email) - Manejo de errores
-        if len(query.strip()) > 3:
-            try:
-                leakatlas_results = search_leakatlas(query)
-                if leakatlas_results:
-                    for item in leakatlas_results:
-                        results.append({
-                            "title": item.get("title", "Sin título"),
-                            "url": item.get("url"),
-                            "date": item.get("date"),
-                            "size": item.get("size", "Desconocido"),
-                            "language": item.get("language", "Other"),
-                            "source": "Leakatlas.com",
-                            "type": "leak",
-                            "tags": ["data leak", "breach"]
-                        })
-            except Exception as e:
-                logger.warning(f"Error buscando en Leakatlas: {e}")
-
-        # 4. Buscar en Google Site Search (siempre, sin filtro de email)
-        if len(query.strip()) > 3:
-            try:
-                google_results = search_google_site(query)
-                if google_results:
-                    for item in google_results:
-                        results.append({
-                            "title": item.get("title"),
-                            "url": item.get("url"),
-                            "date": item.get("date"),
-                            "size": "N/A",
-                            "language": item.get("language", "Unknown"),
-                            "source": "Google Site Search",
-                            "type": "web",
-                            "tags": ["public paste"]
-                        })
-            except Exception as e:
-                logger.warning(f"Error buscando en Google Site Search: {e}")
-
-        # 5. Buscar en leaks específicos (siempre)
-        leak_results = search_leaks(query, user_id=user_id)
-        results.extend(leak_results)
+        if r.status_code == 200:
+            data = r.json()
+            return [{
+                "title": breach.get("Name"),
+                "date": breach.get("Date"),
+                "url": breach.get("Link"),
+                "source": "HIBP",
+                "type": "breach"
+            } for breach in data]
 
     except Exception as e:
-        logger.error(f"Error en búsqueda de paste: {e}")
-        results = []
+        logger.warning(f"HIBP paste error: {e}")
+
+    return []
+
+
+# ---------------------------------------------------------
+# GITHUB GIST
+# ---------------------------------------------------------
+
+def _search_github_gist(query: str) -> List[Dict[str, Any]]:
+    results = []
+
+    try:
+        headers = {"User-Agent": "QuasarIII/1.0"}
+        params = {"q": query, "per_page": 5}
+
+        r = requests.get(
+            "https://api.github.com/search/gists",
+            headers=headers,
+            params=params,
+            timeout=TIMEOUT
+        )
+
+        if r.status_code == 200:
+            data = r.json().get("items", [])
+            for gist in data:
+                results.append({
+                    "title": gist.get("description") or "GitHub Gist",
+                    "url": gist.get("html_url"),
+                    "source": "GitHub Gist",
+                    "type": "paste"
+                })
+
+    except Exception as e:
+        logger.warning(f"Gist search error: {e}")
 
     return results
 
 
-def search_gist_by_keyword(query: str) -> List[Dict[str, Any]]:
-    """
-    Buscar gists en GitHub (public) que contengan el texto especificado
-    """
-    try:
-        query = query.lower().strip()
-        headers = {
-            "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "QuasarIII/1.0"
-        }
-        params = {
-            "q": f"filename:*.py {query} OR file:*.txt {query} OR {query}",
-            "per_page": 5,
-            "page": 1
-        }
+# ---------------------------------------------------------
+# GOOGLE SITE SEARCH (LIGHT)
+# ---------------------------------------------------------
 
-        response = requests.get(GITHUB_GIST_URL, headers=headers, params=params, timeout=10)
-        if response.status_code == 200:
-            try:
-                data = response.json()
-                # Corrección: verificar estructura del resultado
-                if isinstance(data, dict) and "data" in data:
-                    return data["data"][:5]  # Solo 5 resultados
-                elif isinstance(data, list):
-                    return data[:5]  # Si ya es una lista
-                else:
-                    logger.warning("Estructura inesperada de resultados de GitHub Gist")
-                    return []
-            except Exception:
-                # Si hay error al parsear JSON, retornar vacío
-                logger.warning("Error parseando resultados de GitHub Gist")
-                return []
-        else:
-            logger.warning(f"GitHub request failed: {response.status_code}")
-            return []
-
-    except Exception as e:
-        logger.error(f"Error en búsqueda de GitHub Gist: {e}")
-        return []
-
-
-def search_leakatlas(query: str) -> List[Dict[str, Any]]:
-    """
-    Buscar en Leakatlas.com (búsqueda pública por palabra clave)
-    """
-    try:
-        search_url = f"{LEAKATLAS_URL}?q={query}"
-        headers = {
-            "User-Agent": "QuasarIII/1.0"
-        }
-        response = requests.get(search_url, headers=headers, timeout=10)
-
-        if response.status_code == 200:
-            try:
-                data = response.json()
-                if data.get("results"):
-                    return [
-                        {
-                            "title": r.get("title"),
-                            "url": r.get("url"),
-                            "date": r.get("date"),
-                            "size": r.get("size", "Desconocido"),
-                            "language": r.get("language", "Unknown")
-                        }
-                        for r in data["results"][:5]
-                    ]
-            except Exception:
-                logger.warning("Error parseando resultados de Leakatlas")
-                return []
-        else:
-            logger.warning(f"Leakatlas error: {response.status_code}")
-            return []
-    except Exception as e:
-        logger.error(f"Error en búsqueda de Leakatlas: {e}")
-        return []
-
-
-def search_google_site(query: str) -> List[Dict[str, Any]]:
-    """
-    Buscar en Google con query site:pastebin.com
-    """
-    try:
-        search_url = f"https://www.google.com/search?q=site:pastebin.com+{query}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0"
-        }
-        response = requests.get(search_url, headers=headers, timeout=10)
-
-        if response.status_code == 200:
-            # Por simplicidad, retornamos solo un resultado simulado
-            # La implementación real requiere scraping de HTML
-            return [
-                {
-                    "title": f"Pastebin: {query}",
-                    "url": f"https://pastebin.com/search?query={query}",
-                    "date": "Desconocido",
-                    "language": "HTML",
-                    "source": "Google Site Search"
-                }
-            ]
-        else:
-            logger.warning(f"Google search failed: {response.status_code}")
-            return []
-    except Exception as e:
-        logger.error(f"Error en búsqueda de Google Site: {e}")
-        return []
-
-
-def search_leaks(query: str, user_id: int = None) -> List[Dict[str, Any]]:
-    """
-    Búsqueda real de leaks (breaches o datos expuestos)
-    Usa HIBP como fuente principal
-    """
-    logger.info(f"Buscando leaks por: {query}")
-
-    results = []
-    try:
-        # Revisar si es un correo electrónico antes de buscar en HIBP
-        hibp_key = config_manager.get_config(user_id, "hibp") if user_id else None
-        is_email = bool(re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', query.strip()))
-
-        if hibp_key and is_email:
-            query_hash = quote_plus(query.lower().strip())
-            url = f"{HIBP_BASE_URL}/{query_hash}"
-            headers = {"x-apikey": hibp_key, "User-Agent": "QuasarIII/1.0"}
-
-            for attempt in range(MAX_RETRIES):
-                try:
-                    response = requests.get(url, headers=headers, timeout=10)
-                    if response.status_code == 200:
-                        data = response.json()
-                        if data:
-                            for breach in data:
-                                results.append({
-                                    "source": "HaveIBeenPwned",
-                                    "data_breached": breach.get("Name"),
-                                    "compromised_users": breach.get("Breach", 0),
-                                    "date_breached": breach.get("Date"),
-                                    "type": breach.get("Type"),
-                                    "tags": ["breach", "data_leak", "credentials"]
-                                })
-                        break
-                    elif response.status_code == 401:
-                        logger.warning("HIBP: Clave API inválida o no autorizada")
-                        break
-                    elif response.status_code == 404:
-                        # No se encontraron brechas para ese email
-                        logger.info("HIBP: No se encontraron brechas para este correo")
-                        break
-                    else:
-                        logger.warning(f"HIBP error: {response.status_code}")
-                        if attempt < MAX_RETRIES - 1:
-                            time.sleep(DELAY_BETWEEN_REQUESTS)
-                except Exception as e:
-                    logger.error(f"HIBP request failed: {e}")
-                    if attempt < MAX_RETRIES - 1:
-                        time.sleep(DELAY_BETWEEN_REQUESTS)
-        elif not is_email:
-            logger.info("Consulta no es un correo electrónico válido. Omitiendo búsqueda en HIBP.")
-        else:
-            logger.warning("Clave HIBP no configurada. No se puede buscar leaks.")
-
-    except Exception as e:
-        logger.error(f"Error en búsqueda de leaks: {e}")
-        results = []
-
-    return results
+def _search_google_site(query: str) -> List[Dict[str, Any]]:
+    return [{
+        "title": f"Possible Pastebin result for {query}",
+        "url": f"https://pastebin.com/search?q={quote_plus(query)}",
+        "source": "Google (site:pastebin)",
+        "type": "paste"
+    }]

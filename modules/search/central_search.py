@@ -1,102 +1,127 @@
+# modules/search/central_search.py
+"""
+Central Search Coordinator — OSINT UX SAFE
+✔ No ejecuta fuentes sensibles sin intención explícita
+✔ Respeta modo pasivo / activo
+✔ Devuelve estructura limpia y predecible
+"""
+
 import logging
 from typing import Dict, List, Any, Optional
-from modules.search.socmint.socmint import search_social_profiles
-from . import (
-    general_search,
-    people_search,
-    emailint,
-    darkweb,
-    archive_search,
-    google_dorks
-)
 
 logger = logging.getLogger(__name__)
 
+# Imports tolerantes
+try:
+    from . import general_search
+except Exception:
+    general_search = None
+
+try:
+    from . import people_search
+except Exception:
+    people_search = None
+
+try:
+    from . import emailint
+except Exception:
+    emailint = None
+
+try:
+    from .socmint.socmint import search_social_profiles
+except Exception:
+    search_social_profiles = None
+
+
+# ============================================================
+# COORDINADOR CENTRAL
+# ============================================================
 
 class SearchCoordinator:
 
-    def __init__(self, max_workers: int = 5):
-        self.providers = {
-            'general': general_search,
-            'people': people_search,
-            'email': emailint,
-            'social': search_social_profiles,
-            'darkweb': darkweb,
-            'archive': archive_search,
-            'dorks': google_dorks
-        }
-        self.max_workers = max_workers
+    SAFE_DEFAULT_SOURCES = {"general", "people"}
 
-    def search(self, query: str, sources: List[str] = None, user_id: int = None, **kwargs):
+    def search(
+        self,
+        query: str,
+        sources: Optional[List[str]] = None,
+        user_id: Optional[int] = None,
+        mode: str = "passive",
+        **kwargs
+    ) -> Dict[str, Any]:
 
-        logger.info(f"Realizando búsqueda centralizada: '{query}'")
+        logger.info("Central search | query=%s | sources=%s | mode=%s", query, sources, mode)
 
-        results = {}
-        selected_sources = sources or list(self.providers.keys())
+        results: Dict[str, Any] = {}
 
-        for source in selected_sources:
+        # ---------- Default seguro ----------
+        selected_sources = set(sources) if sources else self.SAFE_DEFAULT_SOURCES
 
-            if source not in self.providers:
-                results[source] = {"error": f"Fuente inexistente: {source}"}
-                continue
+        # ---------- GENERAL (pasivo) ----------
+        if "general" in selected_sources and general_search:
+            results["general"] = general_search.search_general_real(
+                query=query,
+                user_id=user_id or 1,
+                mode=mode
+            )
 
-            provider = self.providers[source]
+        # ---------- PEOPLE ----------
+        if "people" in selected_sources and people_search:
+            if hasattr(people_search, "search_people_by_name"):
+                results["people"] = {
+                    "source": "people",
+                    "results": people_search.search_people_by_name(query)
+                }
 
-            try:
-                # GENERAL
-                if source == 'general':
-                    opts = kwargs.get('general_options', {})
-                    max_results = opts.get('max_results', 10)
-                    results[source] = provider.search_web_search_real(query, max_results=max_results)
+        # ---------- EMAIL (solo si es email) ----------
+        if "email" in selected_sources and emailint:
+            if "@" in query:
+                results["email"] = emailint.search_email_info(query, user_id or 1)
+            else:
+                results["email"] = {
+                    "source": "email",
+                    "skipped": "query_is_not_email"
+                }
 
-                # PEOPLE
-                elif source == 'people':
-                    opts = kwargs.get('people_options', {})
-                    criteria = {"name": query}
-                    if opts.get("location"):
-                        criteria["location"] = opts["location"]
-                    results[source] = provider.advanced_search(criteria, "people")
+        # ---------- SOCIAL (SOLO si username explícito) ----------
+        if "social" in selected_sources and search_social_profiles:
+            username = kwargs.get("username")
+            if username:
+                results["social"] = search_social_profiles(username)
+            else:
+                results["social"] = {
+                    "source": "social",
+                    "skipped": "username_required"
+                }
 
-                # EMAIL
-                elif source == 'email':
-                    opts = kwargs.get('email_options', {})
-                    services = opts.get('services', ['hibp', 'skymem', 'ghunt'])
-                    results[source] = provider.search_email_info(query, user_id=user_id, services=services)
-
-                # SOCIAL (SOCMINT)
-                elif source == 'social':
-                    opts = kwargs.get('social_options', {})
-                    username = opts.get("username")  # username manual directo
-                    results[source] = { "results": search_social_profiles(query=query, username=username)}
-
-                # DARKWEB
-                elif source == 'darkweb':
-                    opts = kwargs.get('darkweb_options', {})
-                    max_results = opts.get("max_results", 5)
-                    results[source] = provider.search_dark_web_catalog(query, max_results=max_results)
-
-                # ARCHIVE
-                elif source == 'archive':
-                    opts = kwargs.get('archive_options', {})
-                    sources_arch = opts.get("sources", ['wayback', 'archive'])
-                    results[source] = provider.search_web_archives(query, sources_arch)
-
-                # DORKS
-                elif source == 'dorks':
-                    opts = kwargs.get('dorks_options', {})
-                    patterns = opts.get('patterns')
-                    results[source] = provider.search_google_dorks(query, patterns)
-
-            except Exception as e:
-                logger.error(f"Error ejecutando fuente {source}: {e}")
-                results[source] = {"error": str(e)}
+        # ---------- BLOQUEAR FUENTES SENSIBLES ----------
+        for forbidden in ("darkweb", "dorks", "archive"):
+            if forbidden in selected_sources:
+                results[forbidden] = {
+                    "source": forbidden,
+                    "skipped": "explicit_user_action_required"
+                }
 
         return results
 
 
-# Instancia global
+# ============================================================
+# API PÚBLICA
+# ============================================================
+
 coordinator = SearchCoordinator()
 
-
-def execute_search(query: str, sources: List[str] = None, user_id: Optional[int] = None, **kwargs):
-    return coordinator.search(query, sources=sources, user_id=user_id, **kwargs)
+def execute_search(
+    query: str,
+    sources: Optional[List[str]] = None,
+    user_id: Optional[int] = None,
+    mode: str = "passive",
+    **kwargs
+) -> Dict[str, Any]:
+    return coordinator.search(
+        query=query,
+        sources=sources,
+        user_id=user_id,
+        mode=mode,
+        **kwargs
+    )

@@ -1,303 +1,347 @@
 # modules/search/advanced_search.py
-import logging
-import requests
-import time
-from typing import Dict, List, Any
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
-import streamlit as st
+"""
+Advanced Search Coordinator — versión endurecida y estable.
+Todos los módulos (people, email, SOCMINT, domains, web, dorks)
+devuelven estructuras coherentes para UI/Streamlit.
+"""
 
-from core.config_manager import config_manager
+import time
+import logging
+from typing import Dict, Any, List, Optional
+from modules.search.socmint.profile_unifier import unify_profile
+from .correlation.profile_unifier import unify_profiles
 
 logger = logging.getLogger(__name__)
 
-# Importar los módulos reales
-from . import people_search, emailint, socmint, google_dorks, archive_search
+# Importaciones tolerantes
+try:
+    from . import people_search
+except:
+    people_search = None
+
+try:
+    from . import emailint
+except:
+    emailint = None
+
+try:
+    from . import socmint
+except:
+    socmint = None
+
+try:
+    from . import archive_search
+except:
+    archive_search = None
+
+try:
+    from . import domainint
+except:
+    domainint = None
+
+try:
+    from . import google_dorks
+except:
+    google_dorks = None
 
 
-@dataclass
-class SearchResult:
-    """Clase para estructurar resultados de búsqueda"""
-    source: str
-    query: str
-    data: Dict[str, Any]
-    confidence: float
-    timestamp: float
-    metadata: Dict[str, Any] = None
 
+# ================================================================
+#     CLASE PRINCIPAL: AdvancedSearcher
+# ================================================================
 
 class AdvancedSearcher:
-    """Sistema avanzado de búsqueda multifunción con múltiples fuentes reales"""
 
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'QuasarIII-OSINT/1.0',
-            'Accept': 'application/json'
-        })
-        self.max_workers = 4  # Máximo de hilos concurrentes
+    def __init__(self, timeout: int = 20):
+        self.timeout = timeout
 
-    def search_multiple_sources(self, query: str, sources: List[str] = None, username: str = None) -> Dict[str, Any]:
-        """
-        Búsqueda múltiple en fuentes especificadas.
-        `username` es opcional y se usa únicamente para SOCMINT (si está proporcionado).
-        """
-        if sources is None:
-            sources = ['people', 'email', 'social', 'web', 'domain', 'dorks']
 
-        start_time = time.time()
-        results = {}
+    # ------------------------------------------------------------
+    # PEOPLE SEARCH
+    # ------------------------------------------------------------
+    def _search_people(self, query: str) -> Dict[str, Any]:
+        out = {"source": "people", "query": query,
+               "results": [], "errors": [], "has_data": False}
 
         try:
-            max_workers = min(len(sources), 4)
+            if not people_search or not hasattr(people_search, "search_people_by_name"):
+                out["errors"].append("people_search module missing")
+                return out
 
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {}
-                for source in sources:
-                    if source == 'people':
-                        futures[executor.submit(self._search_people_with_social, query)] = source
-                    elif source == 'email':
-                        futures[executor.submit(self._search_email, query)] = source
-                    elif source == 'social':
-                        # Ejecutar búsqueda social: si hay username explícito, pásalo, si no, intentamos usar query como username (solo si parece username)
-                        futures[executor.submit(self._search_social, query, username)] = source
-                    elif source == 'web':
-                        futures[executor.submit(self._search_web, query)] = source
-                    elif source == 'domain':
-                        futures[executor.submit(self._search_domain, query)] = source
-                    elif source == 'dorks':
-                        futures[executor.submit(self._search_dorks, query)] = source
-                    else:
-                        futures[executor.submit(self._search_generic, source, query)] = source
+            res = people_search.search_people_by_name(query)
 
-                for future in as_completed(futures.keys()):
-                    source = futures[future]
-                    try:
-                        result = future.result(timeout=60)
-                        if result:
-                            results[source] = result
-                    except Exception as e:
-                        logger.error(f"Error en búsqueda en {source}: {e}")
-                        results[source] = {"error": str(e)}
-
-            logger.info(f"Búsqueda múltiple completada en {time.time() - start_time:.2f}s")
-            # Añadimos metadata global
-            results["_metadata"] = {"total_sources": len(results), "search_time": time.time() - start_time}
-            return results
+            if isinstance(res, list):
+                out["results"] = res
+                out["has_data"] = len(res) > 0
 
         except Exception as e:
-            logger.error(f"Error en búsqueda múltiple: {e}")
-            return {"error": f"Error de búsqueda: {str(e)}"}
+            logger.exception("People search failed")
+            out["errors"].append(str(e))
 
-    def search_with_filtering(self, criteria: Dict[str, Any],
-                              sources: List[str] = None,
-                              filters: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Búsqueda avanzada con filtros"""
-        start_time = time.time()
-        query = criteria.get('query') or ' '.join([str(v) for v in criteria.values()])
-        username = criteria.get('username') if isinstance(criteria, dict) else None
+        return out
 
-        results = self.search_multiple_sources(query, sources or ['people', 'email', 'social'], username=username)
 
-        if filters:
-            results = self._apply_filters(results, filters)
+    # ------------------------------------------------------------
+    # EMAIL SEARCH
+    # ------------------------------------------------------------
+    def _search_email(self, query: str, user_id: int = 1) -> Dict[str, Any]:
+        out = {"source": "email", "query": query,
+               "results": [], "errors": [], "has_data": False}
 
-        logger.info(f"Búsqueda con filtros completada en {time.time() - start_time:.2f}s")
+        try:
+            if "@" not in query:
+                return out
+
+            if not emailint or not hasattr(emailint, "search_email_info"):
+                out["errors"].append("emailint module missing")
+                return out
+
+            info = emailint.search_email_info(query, user_id=user_id)
+
+            # Siempre envolvemos en lista
+            out["results"] = [info]
+            out["has_data"] = True
+
+        except Exception as e:
+            logger.exception("Email search failed")
+            out["errors"].append(str(e))
+
+        return out
+
+
+    # ------------------------------------------------------------
+    # SOCIAL (SOCMINT: Maigret + Sherlock)
+    # ------------------------------------------------------------
+    def _search_social(self, query: str, username: Optional[str] = None):
+        out = {
+            "source": "social",
+            "query": query,
+            "results": {},
+            "errors": [],
+            "has_data": False
+        }
+
+        username_to_use = username or (query if "@" not in query else None)
+        if not username_to_use:
+            return out
+
+        from modules.search.socmint.socmint import search_social_profiles
+        raw = search_social_profiles(username_to_use)
+
+        profiles = raw.get("social_profiles", {})
+
+        # 🔥 SOLO marcar has_data si hay perfiles reales
+        valid_profiles = {
+            k: v for k, v in profiles.items()
+            if isinstance(v, dict) and not v.get("error")
+        }
+
+        if valid_profiles:
+            out["results"] = valid_profiles
+            out["has_data"] = True
+        else:
+            out["results"] = profiles  # solo errores
+            out["has_data"] = False
+
+        out["errors"].extend(raw.get("errors", []))
+        return out
+
+    # ------------------------------------------------------------
+    # DOMAIN / ARCHIVE
+    # ------------------------------------------------------------
+    def _search_domain(self, query: str) -> Dict[str, Any]:
+        out = {"source": "domain", "query": query,
+               "results": {}, "errors": [], "has_data": False}
+
+        try:
+            # WHOIS + DNS
+            if domainint and hasattr(domainint, "whois_lookup"):
+                whois = domainint.whois_lookup(query)
+                dns = domainint.dns_lookup(query) if hasattr(domainint, "dns_lookup") else {}
+                passive = domainint.passive_dns(query) if hasattr(domainint, "passive_dns") else {}
+
+                out["results"] = {"whois": whois, "dns": dns, "passive": passive}
+                out["has_data"] = True
+                return out
+
+            # ARCHIVE fallback
+            if archive_search and hasattr(archive_search, "search_web_archives"):
+                arch = archive_search.search_web_archives(query, ["wayback"])
+                out["results"] = {"archive": arch}
+                out["has_data"] = bool(arch)
+                return out
+
+        except Exception as e:
+            logger.exception("Domain search failed")
+            out["errors"].append(str(e))
+
+        return out
+
+
+    # ------------------------------------------------------------
+    # WEB SEARCH (DuckDuckGo)
+    # ------------------------------------------------------------
+    def _search_web(self, query: str) -> Dict[str, Any]:
+        out = {"source": "web", "query": query,
+               "results": [], "errors": [], "has_data": False}
+
+        try:
+            import urllib.parse, requests
+            api = f"https://api.duckduckgo.com/?q={urllib.parse.quote_plus(query)}&format=json&no_redirect=1"
+            r = requests.get(api, timeout=10)
+
+            if r.status_code == 200:
+                data = r.json()
+                topics = data.get("RelatedTopics", [])
+
+                for t in topics:
+                    if isinstance(t, dict) and t.get("FirstURL"):
+                        out["results"].append({
+                            "title": t.get("Text"),
+                            "url": t.get("FirstURL"),
+                            "snippet": t.get("Text"),
+                            "confidence": 0.6,
+                        })
+
+            if out["results"]:
+                out["has_data"] = True
+            else:
+                out["results"] = [{
+                    "title": f"Search: {query}",
+                    "url": f"https://duckduckgo.com/?q={query}",
+                    "snippet": "",
+                    "confidence": 0.3,
+                }]
+
+        except Exception as e:
+            logger.exception("Web search failed")
+            out["errors"].append(str(e))
+
+        return out
+
+
+    # ------------------------------------------------------------
+    # GOOGLE DORKS
+    # ------------------------------------------------------------
+    def _search_dorks(self, query: str) -> Dict[str, Any]:
+        out = {"source": "dorks", "query": query,
+               "results": [], "errors": [], "has_data": False}
+
+        try:
+            if google_dorks and hasattr(google_dorks, "search_google_dorks"):
+                res = google_dorks.search_google_dorks(query)
+                out["results"] = res
+                out["has_data"] = bool(res)
+
+        except Exception as e:
+            logger.exception("Dorks search failed")
+            out["errors"].append(str(e))
+
+        return out
+
+
+
+    # ------------------------------------------------------------
+    # BUSCADOR MULTIFUENTE
+    # ------------------------------------------------------------
+    def search_multiple_sources(self, query: str,
+                                sources: List[str],
+                                username: Optional[str] = None,
+                                user_id: int = 1):
+        start = time.time()
+        results = {}
+        searched = []
+
+        try:
+            if "people" in sources:
+                results["people"] = self._search_people(query)
+                searched.append("people")
+
+            if "email" in sources:
+                results["email"] = self._search_email(query, user_id=user_id)
+                searched.append("email")
+
+            if "domain" in sources:
+                results["domain"] = self._search_domain(query)
+                searched.append("domain")
+
+            if "web" in sources:
+                results["web"] = self._search_web(query)
+                searched.append("web")
+
+            if "social" in sources:
+                results["social"] = self._search_social(query, username=username)
+                searched.append("social")
+
+            if "dorks" in sources:
+                results["dorks"] = self._search_dorks(query)
+                searched.append("dorks")
+
+        except Exception as e:
+            logger.error("CRITICAL error in multi-source search", exc_info=True)
+            results["fatal_error"] = str(e)
+
+        # Meta info
+        results["_metadata"] = {
+            "query": query,
+            "search_time": round(time.time() - start, 3),
+            "sources_searched": searched
+        }
+
         return results
 
-    # ------------------ Búsquedas por fuente ------------------
-    def _search_people(self, query: str) -> Dict[str, Any]:
-        try:
-            results = people_search.search_people_by_name(query)
-            total = len(results) if isinstance(results, list) else (0 if results is None else 1)
-            return {"source": "people", "query": query, "results": results,
-                    "metadata": {"total_results": total, "search_time": time.time()}}
-        except Exception as e:
-            return {"source": "people", "query": query, "error": f"Búsqueda personas: {e}"}
 
-    def _search_people_with_social(self, query: str) -> Dict[str, Any]:
-        """
-        Búsqueda de personas + SOCMINT únicamente si hay username dentro de cada persona.
-        No sobrescribe la lista de personas.
-        """
-        try:
-            people_results = self._search_people(query)
-
-            if "results" in people_results and isinstance(people_results["results"], list):
-                new_list = []
-                for person in people_results["results"]:
-                    if not isinstance(person, dict):
-                        new_list.append(person)
-                        continue
-
-                    person_copy = person.copy()
-
-                    # Preferimos username explícito de la persona; si no, intentar extraer del email
-                    username = None
-                    if person_copy.get("username") and isinstance(person_copy.get("username"), str):
-                        username = person_copy.get("username").strip()
-                    elif person_copy.get("email") and isinstance(person_copy.get("email"), str) and "@" in person_copy.get("email"):
-                        username = person_copy.get("email").split("@")[0].strip()
-
-                    if username and len(username) > 1:
-                        try:
-                            social_result = socmint.search_social_profiles(username=username, platforms=["maigret", "sherlock"])
-                            # Guardar social_profiles dentro de la persona — no sustituir people.results
-                            person_copy["social_profiles"] = social_result.get("social_profiles", {})
-                        except Exception as e:
-                            logger.warning(f"Error SOCMINT para {username}: {e}")
-                            person_copy["social_profiles"] = {"error": str(e)}
-
-                    new_list.append(person_copy)
-
-                people_results["results"] = new_list
-
-            return people_results
-
-        except Exception as e:
-            logger.error(f"Error en búsqueda avanzada de personas con sociales: {e}")
-            return {"source": "people_social", "query": query, "error": f"Búsqueda personas con sociales: {str(e)}"}
-
-    def _search_email(self, query: str) -> Dict[str, Any]:
-        try:
-            user_id = st.session_state.get('current_user_id')
-            if not isinstance(query, str) or not query or '@' not in query:
-                return {"source": "email", "query": query, "results": []}
-
-            if query and isinstance(query, str) and '@' in query and '.' in query.split('@')[1]:
-                if not emailint.verify_email_format(query):
-                    return {"source": "email", "query": query, "error": "Formato de email inválido"}
-            else:
-                return {"source": "email", "query": query, "results": []}
-
-            return emailint.search_email_info(email=query, user_id=user_id)
-
-        except Exception as e:
-            return {"source": "email", "query": query, "error": f"Búsqueda email: {str(e)}"}
-
-    def _search_social(self, query: str, username_override: str = None) -> Dict[str, Any]:
-        """
-        Búsqueda de perfiles sociales: usa username_override si está disponible,
-        si no y query parece username (no contiene @) lo usa.
-        """
-        try:
-            username_to_use = None
-            if username_override and isinstance(username_override, str) and len(username_override.strip()) > 1:
-                username_to_use = username_override.strip()
-            else:
-                # si query es un email no lo usamos; si es username (no contiene '@') lo usamos
-                if isinstance(query, str) and "@" not in query and len(query.strip()) > 1:
-                    username_to_use = query.strip()
-
-            if not username_to_use:
-                return {"source": "social", "query": query, "results": [], "metadata": {"total_results": 0}}
-
-            social_data = socmint.search_social_profiles(username=username_to_use)
-            profiles = social_data.get('social_profiles', {})
-            # Normalizar: devolver estructura útil para UI
-            return {"source": "social", "query": username_to_use, "results": profiles, "metadata": {"total_results": len(profiles) if isinstance(profiles, dict) else 1}}
-
-        except Exception as e:
-            return {"source": "social", "query": query, "error": f"Búsqueda social: {str(e)}"}
-
-    def _search_web(self, query: str) -> Dict[str, Any]:
-        try:
-            import urllib.parse
-            results: List[Dict[str, Any]] = []
-            api_url = f"https://api.duckduckgo.com/?q={urllib.parse.quote_plus(query)}&format=json&no_redirect=1&skip_disambig=1"
-            response = self.session.get(api_url, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-
-                def extract_topics(topics):
-                    for item in topics:
-                        if isinstance(item, dict) and 'Topics' in item:
-                            extract_topics(item['Topics'])
-                        elif isinstance(item, dict) and 'FirstURL' in item and 'Text' in item:
-                            results.append({"title": item['Text'], "url": item['FirstURL'],
-                                            "snippet": item['Text'], "source": "DuckDuckGo",
-                                            "confidence": 0.8, "timestamp": time.time()})
-
-                if 'RelatedTopics' in data:
-                    extract_topics(data['RelatedTopics'])
-
-            if not results:
-                results = [{"title": f"Búsqueda para '{query}'",
-                            "url": f"https://duckduckgo.com/?q={urllib.parse.quote_plus(query)}",
-                            "snippet": "No se encontraron resultados detallados.",
-                            "source": "DuckDuckGo",
-                            "confidence": 0.5,
-                            "timestamp": time.time()}]
-
-            return {"source": "web", "query": query, "results": results,
-                    "metadata": {"total_results": len(results), "search_time": time.time()}}
-
-        except Exception as e:
-            return {"source": "web", "query": query, "error": f"Búsqueda web: {e}"}
-
-    def _search_domain(self, query: str) -> Dict[str, Any]:
-        try:
-            history_results = archive_search.search_domain_history(query, 5)
-            wayback_results = archive_search.search_wayback_machine(query, 2000, 2024) if '.' in query else []
-            return {"source": "domain", "query": query,
-                    "results": {"history": history_results, "wayback_snapshots": wayback_results},
-                    "metadata": {"search_time": time.time()}}
-        except Exception as e:
-            return {"source": "domain", "query": query, "error": f"Búsqueda dominio: {e}"}
-
-    def _search_dorks(self, query: str) -> Dict[str, Any]:
-        try:
-            serpapi_key = config_manager.get_config(st.session_state.get('current_user_id'), 'serpapi') or None
-            google_api_key = config_manager.get_config(st.session_state.get('current_user_id'),
-                                                       'google_api_key') or None
-            google_cx = config_manager.get_config(st.session_state.get('current_user_id'),
-                                                  'google_custom_search_cx') or None
-
-            import os
-            serpapi_key = serpapi_key or os.getenv('SERPAPI_API_KEY')
-            google_api_key = google_api_key or os.getenv('GOOGLE_API_KEY')
-            google_cx = google_cx or os.getenv('GOOGLE_CUSTOM_SEARCH_CX')
-
-            dork_results = google_dorks.search_google_dorks(query, serpapi_key=serpapi_key,
-                                                            google_api_key=google_api_key, google_cx=google_cx)
-            return {"source": "dorks", "query": query, "results": dork_results,
-                    "metadata": {"total_results": len(dork_results), "search_time": time.time()}}
-        except Exception as e:
-            return {"source": "dorks", "query": query, "error": f"Búsqueda dorks: {e}"}
-
-    def _search_generic(self, source: str, query: str) -> Dict[str, Any]:
-        return {"source": source, "query": query, "results": [], "metadata": {"search_time": time.time()}}
-
-    def _apply_filters(self, results: Dict[str, Any], filters: Dict[str, Any]) -> Dict[str, Any]:
-        if not filters:
-            return results
-        filtered_results = {}
-        for source, data in results.items():
-            if isinstance(data, dict) and 'results' in data:
-                filtered_data = data['results']
-                if filters.get('min_confidence'):
-                    filtered_data = [r for r in filtered_data if r.get('confidence', 0) >= filters['min_confidence']]
-                if filters.get('location_filter'):
-                    filtered_data = [r for r in filtered_data if
-                                     filters['location_filter'] in str(r.get('location', ''))]
-                filtered_results[source] = data
-                filtered_results[source]['results'] = filtered_data
-                if 'metadata' not in filtered_results[source]:
-                    filtered_results[source]['metadata'] = {}
-                filtered_results[source]['metadata']['filtered_results'] = len(filtered_data)
-            else:
-                filtered_results[source] = data
-        return filtered_results
+    # ------------------------------------------------------------
+    # FILTROS SECUNDARIOS
+    # ------------------------------------------------------------
+    def search_with_filtering(self, query: str, sources: List[str],
+                              username=None, filters=None, user_id=1):
+        base = self.search_multiple_sources(query, sources,
+                                            username=username,
+                                            user_id=user_id)
+        # Filtros avanzados (sin implementar aún)
+        return base
 
 
-# ------------------ Instancia global y funciones públicas ------------------
+
+# ================================================================
+# Funciones de módulo accesibles por import
+# ================================================================
+
 advanced_searcher = AdvancedSearcher()
 
+def search_multiple_sources(query: str,selected_sources: Optional[List[str]] = None, username: Optional[str] = None, user_id: int = 1):
+    selected_sources = selected_sources or []
+    results = {}
+    try:
+        unified_profile = unify_profiles(
+            email_result=results.get("email"),
+            social_result=results.get("social")
+        )
 
-def search_multiple_sources(query: str, sources: List[str] = None, username: str = None) -> Dict[str, Any]:
-    return advanced_searcher.search_multiple_sources(query, sources, username=username)
+        if unified_profile and unified_profile.get("confidence_score", 0) > 0:
+            results["unified_profile"] = unified_profile
+
+    except Exception as e:
+        logger.warning(f"Profile unification failed: {e}")
+    return advanced_searcher.search_multiple_sources(
+        query,
+        selected_sources,
+        username=username,
+        user_id=user_id
+    )
 
 
-def search_with_filtering(criteria: Dict[str, Any], sources: List[str] = None,
-                          filters: Dict[str, Any] = None) -> Dict[str, Any]:
-    return advanced_searcher.search_with_filtering(criteria, sources, filters)
+def search_with_filtering(query: str,
+                          selected_sources: Optional[List[str]] = None,
+                          username: Optional[str] = None,
+                          filters: Optional[Dict[str, Any]] = None,
+                          user_id: int = 1):
+    selected_sources = selected_sources or []
+    return advanced_searcher.search_with_filtering(
+        query,
+        selected_sources,
+        username=username,
+        filters=filters,
+        user_id=user_id
+    )

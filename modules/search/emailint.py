@@ -48,17 +48,36 @@ try:
 
     _orig_get_reviews = ghunt_gmaps.get_reviews
 
-    async def _safe_get_reviews(as_client, gaia_id):  # type: ignore
+    @contextlib.contextmanager
+    def _silent_bar(*_args, **_kwargs):
+        yield lambda *_a, **_k: None
+
+    async def _safe_get_reviews(as_client, gaia_id):  # type: ignore[override]
+        """
+        GHunt gmaps.get_reviews sin progress bar
+        y con fallback defensivo ante edge cases.
+        """
+        original_bar = getattr(ghunt_gmaps, "alive_bar", None)
+        ghunt_gmaps.alive_bar = _silent_bar  # type: ignore[assignment]
         try:
             return await _orig_get_reviews(as_client, gaia_id)
-        except IndexError:
+        except IndexError as exc:
             logger.warning(
-                "GHunt: respuesta de Maps inesperada, se omiten reseñas/fotos.",
-                exc_info=True,
+                "GHunt: respuesta de Maps inesperada, se omiten reseñas/fotos. %s",
+                exc,
             )
-            return "private", {}, [], []
+            return "failed", {}, [], []
+        except Exception as exc:
+            logger.warning(
+                "GHunt: error en get_reviews, devolviendo vacío: %s",
+                exc,
+            )
+            return "failed", {}, [], []
+        finally:
+            if original_bar is not None:
+                ghunt_gmaps.alive_bar = original_bar  # type: ignore[assignment]
 
-    ghunt_gmaps.get_reviews = _safe_get_reviews
+    ghunt_gmaps.get_reviews = _safe_get_reviews  # type: ignore[assignment]
 
     GHUNT_AVAILABLE = True
     logger.info("GHunt cargado correctamente")

@@ -1,5 +1,6 @@
 import streamlit as st
 
+
 def _render_hibp(hibp: dict):
     if not hibp:
         st.info("No se pudieron cargar datos de HIBP")
@@ -31,36 +32,44 @@ def _render_ghunt(ghunt: dict):
 def render_email_block(email_block: dict):
     if not email_block:
         return
+
     st.markdown("### 📧 Emails")
+
     results = email_block.get("results") if isinstance(email_block, dict) else None
     if not results:
         st.info("No hay resultados de email")
         return
 
     for e in results:
-        email_value = e.get("email", "N/A") if isinstance(e, dict) else "N/A"
+        if not isinstance(e, dict):
+            continue
+
+        email_value = e.get("email", "N/A")
         st.markdown(f"#### {email_value}")
 
-        hibp_data = e.get("hibp") if isinstance(e, dict) else None
+        hibp_data = e.get("hibp")
         if hibp_data:
             _render_hibp(hibp_data)
 
-        ghunt_data = e.get("ghunt") if isinstance(e, dict) else None
+        ghunt_data = e.get("ghunt")
         if ghunt_data:
             _render_ghunt(ghunt_data)
 
         st.markdown("---")
 
 
-
-
 def render_web_block(web_block: dict):
     if not web_block:
         return
+
     st.markdown("### 🌍 Resultados Web")
+
     results = web_block.get("results") if isinstance(web_block, dict) else []
     for item in results:
-        title = item.get('title') or item.get('name') or 'Sin título'
-        url = item.get('url') or item.get('link') or '#'
-        snippet = item.get('snippet', '')
+        if not isinstance(item, dict):
+            continue
+
+        title = item.get("title") or item.get("name") or "Sin título"
+        url = item.get("url") or item.get("link") or "#"
+        snippet = item.get("snippet", "")
         st.markdown(f"- [{title}]({url}) — {snippet}")

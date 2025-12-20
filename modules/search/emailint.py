@@ -15,6 +15,8 @@ import logging
 import urllib.parse
 from typing import Dict, Any
 from requests import Session
+import io
+import contextlib
 
 from core.config_manager import config_manager
 
@@ -42,6 +44,22 @@ GHUNT_IMPORT_ERROR = None
 
 try:
     from ghunt.modules.email import hunt as ghunt_hunt  # type: ignore
+    import ghunt.helpers.gmaps as ghunt_gmaps  # type: ignore
+
+    _orig_get_reviews = ghunt_gmaps.get_reviews
+
+    async def _safe_get_reviews(as_client, gaia_id):  # type: ignore
+        try:
+            return await _orig_get_reviews(as_client, gaia_id)
+        except IndexError:
+            logger.warning(
+                "GHunt: respuesta de Maps inesperada, se omiten reseñas/fotos.",
+                exc_info=True,
+            )
+            return "private", {}, [], []
+
+    ghunt_gmaps.get_reviews = _safe_get_reviews
+
     GHUNT_AVAILABLE = True
     logger.info("GHunt cargado correctamente")
 except Exception as e:
@@ -106,15 +124,21 @@ def ghunt_lookup(email: str) -> Dict[str, Any]:
     try:
         import asyncio
 
+        buffer = io.StringIO()
+
         async def _run():
-            return await ghunt_hunt(None, email)
+            with contextlib.redirect_stdout(buffer):
+                return await ghunt_hunt(None, email)
 
         raw = asyncio.run(_run())
+        output = buffer.getvalue().strip()
+        buffer.close()
 
         return {
             "source": "ghunt",
             "success": True,
-            "data": raw
+            "data": raw,
+            "output": output
         }
 
     except Exception as e:

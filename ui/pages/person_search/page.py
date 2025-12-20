@@ -12,10 +12,10 @@ import streamlit as st
 from modules.search.advanced_search import search_multiple_sources
 
 # Componentes UI
-from ui.pages.person_search.components.person_card import render_person_card
-from ui.pages.person_search.components.socmint_block import render_socmint_block
-from ui.pages.person_search.components.web_email_blocks import render_web_block, render_email_block
-from ui.pages.person_search.components.darkweb_block import render_darkweb_block
+from .components.person_card import render_person_card
+from .components.socmint_block import render_socmint_block
+from .components.web_email_blocks import render_web_block, render_email_block
+from .components.darkweb_block import render_darkweb_block
 
 logger = logging.getLogger(__name__)
 

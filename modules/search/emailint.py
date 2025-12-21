@@ -137,6 +137,18 @@ def build_email_source_links(email: str) -> Dict[str, List[Dict[str, Any]]]:
             "emailfinder",
             f"https://app.emailfinder.io/search?email={urllib.parse.quote_plus(email)}"
         ),
+
+        # --- NUEVO: herramienta OSINT (pasiva) ---
+        {
+            "name": "EmailFinder",
+            "source": "emailfinder",
+            "url": "https://github.com/rix4uni/EmailFinder",
+            "command": "python3 emailfinder.py -e <email>",
+            "confidence": "media",
+            "type": "lead_generation",
+            "email": email,
+        },
+
         _build_source_link(email, "Email-Crawler-Lead-Generator", ""),
         _build_source_link(
             email,

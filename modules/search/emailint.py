@@ -427,6 +427,7 @@ def _parse_email2phonenumber_output(text: str) -> Dict[str, Any]:
 def email2phonenumber_scrape(email: str, quiet_mode: bool = False) -> Dict[str, Any]:
     """
     Ejecuta `email2phonenumber.py scrape -e <email>` y devuelve salida parseada.
+    También clasifica fallos comunes de red/DNS.
     """
     start = time.time()
     result: Dict[str, Any] = {
@@ -461,7 +462,8 @@ def email2phonenumber_scrape(email: str, quiet_mode: bool = False) -> Dict[str, 
         result["error"] = deps_info.get("error", "dependency_install_failed")
         return result
 
-    cmd = [sys.executable, "email2phonenumber.py", "scrape", "-e", email]
+    # Silenciamos SyntaxWarning del script de terceros (opcional, pero útil en UI/logs)
+    cmd = [sys.executable, "-W", "ignore::SyntaxWarning", "email2phonenumber.py", "scrape", "-e", email]
     if quiet_mode:
         cmd.append("-q")
 
@@ -475,13 +477,32 @@ def email2phonenumber_scrape(email: str, quiet_mode: bool = False) -> Dict[str, 
             check=False,
         )
 
+        combined = _strip_ansi((proc.stdout or "") + "\n" + (proc.stderr or ""))
+
         result.update({
             "stdout": (proc.stdout or "").strip(),
             "stderr": (proc.stderr or "").strip(),
             "returncode": proc.returncode,
-            "parsed": _parse_email2phonenumber_output(_strip_ansi(proc.stdout or "")),
+            "parsed": _parse_email2phonenumber_output(combined),
             "success": proc.returncode == 0,
         })
+
+        if proc.returncode != 0:
+            errtxt = proc.stderr or ""
+            dns_markers = (
+                "NameResolutionError",
+                "Failed to resolve",
+                "socket.gaierror",
+                "Temporary failure in name resolution",
+            )
+            if any(m in errtxt for m in dns_markers):
+                result["error"] = "dns_resolution_failed"
+            elif "requests.exceptions.ConnectionError" in errtxt or "ConnectionError" in errtxt:
+                result["error"] = "network_connection_error"
+            elif "Timeout" in errtxt or "ReadTimeout" in errtxt:
+                result["error"] = "timeout"
+            else:
+                result["error"] = "execution_failed"
 
     except subprocess.TimeoutExpired:
         result["error"] = "timeout"

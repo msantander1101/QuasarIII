@@ -1,3 +1,5 @@
+# ui/pages/person_search/components/web_email_blocks.py
+
 import streamlit as st
 
 
@@ -28,12 +30,11 @@ def _render_ghunt(ghunt: dict):
         st.warning(f"GHunt: {ghunt.get('error', 'ejecución no exitosa')}")
         return
 
-    output = ghunt.get("output") or "(sin salida capturada)"
     warnings = ghunt.get("warnings") or []
-    if warnings:
-        for w in warnings:
-            st.warning(w)
+    for w in warnings:
+        st.warning(w)
 
+    output = ghunt.get("output") or "(sin salida capturada)"
     with st.expander("Ver salida GHunt cruda", expanded=False):
         st.code(output, language="text")
 
@@ -48,7 +49,7 @@ def _email2phone_score(parsed: dict) -> dict:
     pp = (parsed or {}).get("paypal") or {}
 
     sources_hit = 0
-    signals = []
+    signals: list[str] = []
     points = 0
 
     # LastPass
@@ -136,13 +137,30 @@ def _render_email2phonenumber_operativo(e2p: dict):
 
     # errores duros
     if e2p.get("error"):
-        st.error(f"🔴 Error: {e2p.get('error')}")
+        err = e2p.get("error")
+        human = {
+            "dns_resolution_failed": "Fallo DNS (no se puede resolver el host del proveedor). Revisa DNS/Proxy/egress.",
+            "network_connection_error": "Fallo de conectividad (sin salida a Internet / proxy requerido).",
+            "timeout": "Timeout del scraping (posible bloqueo o red lenta).",
+            "execution_failed": "Ejecución fallida (revisar stderr).",
+            "invalid_email": "Email inválido.",
+        }.get(err, str(err))
+
+        st.error(f"🔴 {human}")
+
         repo = e2p.get("repo") or {}
         if repo.get("status") or repo.get("path"):
             st.caption(f"Repo: {repo.get('status')} — {repo.get('path')}")
+
         dep = e2p.get("dependency_check") or {}
         if dep.get("packages"):
             st.caption(f"Deps faltantes: {', '.join(dep.get('packages') or [])}")
+
+        # si hay stderr útil, enseñarlo (compacto)
+        stderr = (e2p.get("stderr") or "").strip()
+        if stderr:
+            with st.expander("stderr Email2PhoneNumber", expanded=False):
+                st.code(stderr, language="text")
         return
 
     parsed = e2p.get("parsed") or {}

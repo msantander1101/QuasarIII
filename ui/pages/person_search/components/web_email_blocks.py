@@ -172,6 +172,155 @@ def _render_emailfinder_enriched(enriched: list):
 
             st.markdown("---")
 
+# --------------------------------------------------
+# EMAIL2PHONENUMBER — RENDER OPERATIVO
+# --------------------------------------------------
+
+def _email2phone_score(parsed: dict) -> dict:
+    lp = (parsed or {}).get("lastpass") or {}
+    eb = (parsed or {}).get("ebay") or {}
+    pp = (parsed or {}).get("paypal") or {}
+
+    sources_hit = 0
+    signals = []
+    points = 0
+
+    # LastPass
+    lp_hit = False
+    if lp.get("reported") is True and lp.get("last_digits"):
+        lp_hit = True
+        points += 25
+        signals.append(f"LastPass: últimos 2 dígitos {lp.get('last_digits')}")
+    if lp.get("length_without_cc") is not None:
+        lp_hit = True
+        points += 15
+        signals.append(f"LastPass: longitud sin CC {lp.get('length_without_cc')}")
+    if lp.get("non_us"):
+        points += 5
+        signals.append("LastPass: no US")
+    if lp_hit:
+        sources_hit += 1
+
+    # eBay
+    eb_hit = False
+    if eb.get("reported") is True and eb.get("first_digit"):
+        eb_hit = True
+        points += 15
+        signals.append(f"eBay: primer dígito {eb.get('first_digit')}")
+    if eb.get("reported") is True and eb.get("last_digits"):
+        eb_hit = True
+        points += 20
+        signals.append(f"eBay: últimos 2 dígitos {eb.get('last_digits')}")
+    if eb_hit:
+        sources_hit += 1
+
+    # PayPal
+    pp_hit = False
+    if pp.get("reported") is True and pp.get("first_digit"):
+        pp_hit = True
+        points += 15
+        signals.append(f"PayPal: primer dígito {pp.get('first_digit')}")
+    if pp.get("reported") is True and pp.get("last_digits"):
+        pp_hit = True
+        cnt = pp.get("last_digits_count")
+        bonus = 10 if (isinstance(cnt, int) and cnt >= 3) else 0
+        points += 25 + bonus
+        suffix = f" (x{cnt})" if cnt else ""
+        signals.append(f"PayPal: últimos dígitos {pp.get('last_digits')}{suffix}")
+    if pp.get("length_without_cc") is not None:
+        pp_hit = True
+        points += 10
+        signals.append(f"PayPal: longitud sin CC {pp.get('length_without_cc')}")
+    if pp_hit:
+        sources_hit += 1
+
+    # Bonus multi-fuente
+    if sources_hit >= 2:
+        points += 15
+    if sources_hit >= 3:
+        points += 10
+
+    score = max(0, min(100, points))
+
+    if score >= 70:
+        level = "Alta"
+        light = "🟢"
+    elif score >= 35:
+        level = "Media"
+        light = "🟠"
+    else:
+        level = "Baja"
+        light = "🔴"
+
+    return {
+        "score": score,
+        "level": level,
+        "light": light,
+        "sources_hit": sources_hit,
+        "signals": signals,
+    }
+
+
+def _render_email2phonenumber_operativo(e2p: dict):
+    import streamlit as st  # por si este módulo se reutiliza sin st global
+
+    if not e2p:
+        st.info("Email2PhoneNumber sin datos")
+        return
+
+    st.markdown("**Email2PhoneNumber (indicadores de teléfono)**")
+
+    # errores duros
+    if e2p.get("error"):
+        st.error(f"🔴 Error: {e2p.get('error')}")
+        repo = e2p.get("repo") or {}
+        if repo.get("status") or repo.get("path"):
+            st.caption(f"Repo: {repo.get('status')} — {repo.get('path')}")
+        dep = e2p.get("dependency_check") or {}
+        if dep.get("packages"):
+            st.caption(f"Deps faltantes: {', '.join(dep.get('packages') or [])}")
+        return
+
+    parsed = e2p.get("parsed") or {}
+    meta = _email2phone_score(parsed)
+
+    st.markdown(
+        f"{meta['light']} **Confianza: {meta['level']}** "
+        f"(**{meta['score']}/100**, fuentes con señales: **{meta['sources_hit']}**) "
+        f"— tiempo: `{e2p.get('elapsed', 0)}s`"
+    )
+
+    if not e2p.get("success"):
+        st.warning(f"Email2PhoneNumber: ejecución no exitosa (returncode={e2p.get('returncode')})")
+
+    signals = meta.get("signals") or []
+    if signals:
+        for s in signals[:6]:
+            st.markdown(f"- {s}")
+        if len(signals) > 6:
+            st.caption(f"+{len(signals) - 6} señales adicionales (ver detalle)")
+    else:
+        st.info("Sin señales útiles (ningún servicio devolvió dígitos/longitud).")
+
+    with st.expander("Detalle Email2PhoneNumber", expanded=False):
+        msgs = (parsed.get("messages") or [])
+        if msgs:
+            st.code("\n".join(msgs), language="text")
+        else:
+            st.code(e2p.get("stdout") or "(sin stdout)", language="text")
+
+        stderr = (e2p.get("stderr") or "").strip()
+        if stderr:
+            st.markdown("**stderr**")
+            st.code(stderr, language="text")
+
+        st.markdown("**Debug**")
+        st.json({
+            "returncode": e2p.get("returncode"),
+            "repo": e2p.get("repo"),
+            "dependency_check": e2p.get("dependency_check"),
+        })
+
 
 def render_email_block(email_block: dict):
     st.markdown("### 📧 Emails")

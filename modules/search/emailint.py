@@ -7,6 +7,7 @@ Incluye:
   - Verificación básica
   - Enlaces OSINT pasivos (para abrir manualmente desde UI)
   - EmailFinder (lead generation por dominio + parsing + cruce controlado)
+  - Email2PhoneNumber (scrape Paypal/eBay/LastPass)  ✅
 NO incluye:
   - Pastes / Leaks (solo bajo demanda desde UI)
 """
@@ -16,9 +17,12 @@ import time
 import logging
 import urllib.parse
 import os
+import sys
 import shutil
 import subprocess
-from typing import Dict, Any, List, Optional
+from pathlib import Path
+import importlib
+from typing import Dict, Any, List, Optional, Tuple
 from requests import Session
 import io
 import contextlib
@@ -34,6 +38,11 @@ logger = logging.getLogger(__name__)
 EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[A-Za-z]{2,}$")
 EMAIL_EXTRACT_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[A-Za-z]{2,}")
 TIMEOUT = 25
+
+ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
+EMAIL2PHONE_REPO = "https://github.com/martinvigo/email2phonenumber.git"
+EMAIL2PHONE_DIR = Path(__file__).resolve().parents[2] / "data" / "email2phonenumber"
 
 session = Session()
 session.headers.update({
@@ -191,6 +200,309 @@ def build_email_source_links(email: str) -> Dict[str, List[Dict[str, Any]]]:
 
 
 # --------------------------------------------------
+# EMAIL2PHONENUMBER (SCRAPE PAYPAL/EBAY/LASTPASS)
+# --------------------------------------------------
+
+
+def _strip_ansi(text: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", text or "")
+
+
+def _ensure_email2phone_dependencies() -> Dict[str, Any]:
+    """
+    Verifica e instala dependencias requeridas por email2phonenumber.
+    """
+    dependencies = [("bs4", "beautifulsoup4"), ("requests", "requests")]
+    missing = []
+
+    for module_name, package_name in dependencies:
+        if importlib.util.find_spec(module_name) is None:
+            missing.append(package_name)
+
+    result: Dict[str, Any] = {
+        "source": "email2phonenumber_deps",
+        "installed": True,
+        "packages": missing,
+    }
+
+    if not missing:
+        return result
+
+    cmd = [sys.executable, "-m", "pip", "install", *missing]
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+
+    result.update({
+        "installed": proc.returncode == 0,
+        "command": " ".join(cmd),
+        "returncode": proc.returncode,
+        "stdout": (proc.stdout or "").strip(),
+        "stderr": (proc.stderr or "").strip(),
+    })
+
+    if proc.returncode != 0:
+        result["error"] = "pip_install_failed"
+
+    return result
+
+
+def _ensure_email2phonenumber_repo(base_path: Optional[Path] = None) -> Tuple[Optional[Path], Dict[str, Any]]:
+    """
+    Garantiza que el repositorio email2phonenumber esté disponible localmente.
+    """
+    repo_path = Path(base_path or EMAIL2PHONE_DIR)
+    info: Dict[str, Any] = {
+        "source": "email2phonenumber_repo",
+        "path": str(repo_path),
+    }
+
+    script_path = repo_path / "email2phonenumber.py"
+    if script_path.is_file():
+        info["status"] = "present"
+        return repo_path, info
+
+    try:
+        if repo_path.exists():
+            if repo_path.is_dir():
+                shutil.rmtree(repo_path)
+            else:
+                repo_path.unlink()
+        repo_path.parent.mkdir(parents=True, exist_ok=True)
+
+        proc = subprocess.run(
+            ["git", "clone", EMAIL2PHONE_REPO, str(repo_path)],
+            capture_output=True,
+            text=True,
+            timeout=240,
+            check=False,
+        )
+
+        info.update({
+            "status": "cloned" if proc.returncode == 0 else "clone_failed",
+            "returncode": proc.returncode,
+            "stdout": (proc.stdout or "").strip(),
+            "stderr": (proc.stderr or "").strip(),
+        })
+
+        if proc.returncode != 0:
+            return None, info
+
+        if not script_path.is_file():
+            info.update({
+                "status": "missing_script",
+                "error": "email2phonenumber.py not found after clone",
+            })
+            return None, info
+
+        return repo_path, info
+
+    except subprocess.TimeoutExpired:
+        info.update({"status": "timeout", "error": "git_clone_timeout"})
+        return None, info
+
+    except Exception as exc:
+        logger.exception("email2phonenumber clone error")
+        info.update({"status": "error", "error": str(exc)})
+        return None, info
+
+
+def _parse_email2phonenumber_output(text: str) -> Dict[str, Any]:
+    """
+    Parsea la salida de email2phonenumber (modo scrape) a estructura utilizable.
+    """
+    parsed: Dict[str, Any] = {
+        "messages": [],
+        "lastpass": {
+            "reported": None,
+            "last_digits": None,
+            "length_with_cc": None,
+            "length_without_cc": None,
+            "non_us": False,
+            "notes": [],
+        },
+        "ebay": {
+            "reported": None,
+            "first_digit": None,
+            "last_digits": None,
+            "notes": [],
+        },
+        "paypal": {
+            "reported": None,
+            "first_digit": None,
+            "last_digits": None,
+            "last_digits_count": None,
+            "length_without_cc": None,
+            "notes": [],
+        },
+    }
+
+    if not text:
+        return parsed
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        parsed["messages"].append(line)
+
+        lp = parsed["lastpass"]
+        eb = parsed["ebay"]
+        pp = parsed["paypal"]
+
+        if "Lastpass reports that the last 2 digits are:" in line:
+            match = re.search(r"last 2 digits are: (\d+)", line)
+            if match:
+                lp["reported"] = True
+                lp["last_digits"] = match.group(1)
+            continue
+
+        if "Lastpass did not report any digits" in line:
+            lp["reported"] = False
+            lp["notes"].append(line)
+            continue
+
+        if "Lastpass reports a non US phone number" in line:
+            lp["non_us"] = True
+            continue
+
+        if "Lastpass reports that the length of the phone number (including country code)" in line:
+            match = re.search(r"is (\d+) digits", line)
+            if match:
+                lp["length_with_cc"] = int(match.group(1))
+            continue
+
+        if "Lastpass reports that the length of the phone number (without country code)" in line:
+            match = re.search(r"is (\d+) digits", line)
+            if match:
+                lp["length_without_cc"] = int(match.group(1))
+            continue
+
+        if "Ebay reports that the first digit is:" in line:
+            match = re.search(r"first digit is: (\d+)", line)
+            if match:
+                eb["reported"] = True
+                eb["first_digit"] = match.group(1)
+            continue
+
+        if "Ebay reports that the last 2 digits are:" in line:
+            match = re.search(r"last 2 digits are: (\d+)", line)
+            if match:
+                eb["reported"] = True
+                eb["last_digits"] = match.group(1)
+            continue
+
+        if "Ebay did not report any digits" in line:
+            eb["reported"] = False
+            eb["notes"].append(line)
+            continue
+
+        if "Paypal reports that the last" in line:
+            match = re.search(r"last (\d+) digits are: (\d+)", line)
+            if match:
+                pp["reported"] = True
+                pp["last_digits_count"] = int(match.group(1))
+                pp["last_digits"] = match.group(2)
+            continue
+
+        if "Paypal reports that the first digit is:" in line:
+            match = re.search(r"first digit is: (\d+)", line)
+            if match:
+                pp["reported"] = True
+                pp["first_digit"] = match.group(1)
+            continue
+
+        if "Paypal reports that the length of the phone number (without country code)" in line:
+            match = re.search(r"is (\d+) digits", line)
+            if match:
+                pp["length_without_cc"] = int(match.group(1))
+            continue
+
+        if "Paypal did not report any digits" in line:
+            pp["reported"] = False
+            pp["notes"].append(line)
+            continue
+
+    return parsed
+
+
+def email2phonenumber_scrape(email: str, quiet_mode: bool = False) -> Dict[str, Any]:
+    """
+    Ejecuta `email2phonenumber.py scrape -e <email>` y devuelve salida parseada.
+    """
+    start = time.time()
+    result: Dict[str, Any] = {
+        "source": "email2phonenumber",
+        "email": email,
+        "quiet_mode": quiet_mode,
+        "success": False,
+        "repo": None,
+        "dependency_check": None,
+        "stdout": "",
+        "stderr": "",
+        "returncode": None,
+        "parsed": {},
+        "error": None,
+        "elapsed": 0.0,
+    }
+
+    if not verify_email_format(email):
+        result["error"] = "invalid_email"
+        return result
+
+    repo_path, repo_info = _ensure_email2phonenumber_repo()
+    result["repo"] = repo_info
+
+    if not repo_path:
+        result["error"] = repo_info.get("error", "repo_unavailable")
+        return result
+
+    deps_info = _ensure_email2phone_dependencies()
+    result["dependency_check"] = deps_info
+    if deps_info.get("installed") is False:
+        result["error"] = deps_info.get("error", "dependency_install_failed")
+        return result
+
+    cmd = [sys.executable, "email2phonenumber.py", "scrape", "-e", email]
+    if quiet_mode:
+        cmd.append("-q")
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(repo_path),
+            capture_output=True,
+            text=True,
+            timeout=240,
+            check=False,
+        )
+
+        result.update({
+            "stdout": (proc.stdout or "").strip(),
+            "stderr": (proc.stderr or "").strip(),
+            "returncode": proc.returncode,
+            "parsed": _parse_email2phonenumber_output(_strip_ansi(proc.stdout or "")),
+            "success": proc.returncode == 0,
+        })
+
+    except subprocess.TimeoutExpired:
+        result["error"] = "timeout"
+    except FileNotFoundError as exc:
+        result["error"] = str(exc)
+    except Exception as exc:
+        logger.exception("email2phonenumber error")
+        result["error"] = str(exc)
+
+    result["elapsed"] = round(time.time() - start, 3)
+    return result
+
+
+# --------------------------------------------------
 # EMAILFINDER (CLI opcional)
 # --------------------------------------------------
 
@@ -332,7 +644,7 @@ def emailfinder_lookup(email: str) -> Dict[str, Any]:
 # --------------------------------------------------
 
 
-def hibp_lookup(email: str, api_key: str) -> Dict[str, Any]:
+def hibp_lookup(email: str, api_key: Optional[str]) -> Dict[str, Any]:
     if not api_key:
         return {"source": "hibp", "error": "no_api_key"}
 
@@ -493,6 +805,7 @@ def search_email_info(email: str, user_id: int = 1) -> Dict[str, Any]:
         "timestamp": time.time(),
         "hibp": None,
         "ghunt": None,
+        "email2phonenumber": None,
         "emailfinder": None,
         "emailfinder_enriched": [],
         "verification": None,
@@ -516,6 +829,9 @@ def search_email_info(email: str, user_id: int = 1) -> Dict[str, Any]:
             out["ghunt"] = ghunt_lookup(email)
         else:
             out["ghunt"] = {"source": "ghunt", "skipped": "non_gmail"}
+
+        # ---------------- EMAIL2PHONENUMBER ----------------
+        out["email2phonenumber"] = email2phonenumber_scrape(email)
 
         # ---------------- EMAILFINDER ----------------
         out["emailfinder"] = emailfinder_lookup(email)

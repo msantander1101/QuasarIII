@@ -204,6 +204,10 @@ def render_email_block(email_block: dict):
         if ghunt_data:
             _render_ghunt(ghunt_data)
 
+        e2p_data = e.get("email2phonenumber")
+        if e2p_data:
+            _render_email2phonenumber(e2p_data)
+
         verification_data = e.get("verification")
         if verification_data:
             _render_verification(verification_data)
@@ -238,3 +242,84 @@ def render_web_block(web_block: dict):
         url = item.get("url") or item.get("link") or "#"
         snippet = item.get("snippet", "")
         st.markdown(f"- [{title}]({url}) — {snippet}")
+
+def _render_email2phonenumber(e2p: dict):
+    if not e2p:
+        st.info("Email2PhoneNumber sin datos")
+        return
+
+    # error hard (invalid_email, timeout, deps, repo, etc.)
+    if e2p.get("error"):
+        st.warning(f"Email2PhoneNumber: {e2p.get('error')}")
+        repo = e2p.get("repo") or {}
+        if repo:
+            st.caption(f"Repo: {repo.get('status')} — {repo.get('path')}")
+        dep = e2p.get("dependency_check") or {}
+        if dep.get("packages"):
+            st.caption(f"Deps: {', '.join(dep.get('packages') or [])}")
+        return
+
+    if not e2p.get("success"):
+        st.warning("Email2PhoneNumber: ejecución no exitosa")
+        rc = e2p.get("returncode")
+        if rc is not None:
+            st.caption(f"Return code: {rc}")
+        stderr = (e2p.get("stderr") or "").strip()
+        if stderr:
+            with st.expander("stderr Email2PhoneNumber", expanded=False):
+                st.code(stderr, language="text")
+
+    parsed = e2p.get("parsed") or {}
+    lp = parsed.get("lastpass") or {}
+    eb = parsed.get("ebay") or {}
+    pp = parsed.get("paypal") or {}
+
+    # resumen compacto (solo si hay señales)
+    signals = []
+
+    if lp.get("reported") is True:
+        signals.append(f"LastPass: últimos 2 dígitos **{lp.get('last_digits')}**")
+    if lp.get("length_without_cc") is not None:
+        signals.append(f"LastPass: longitud sin CC **{lp.get('length_without_cc')}**")
+    if lp.get("non_us"):
+        signals.append("LastPass: **no US**")
+
+    if eb.get("reported") is True:
+        if eb.get("first_digit"):
+            signals.append(f"eBay: primer dígito **{eb.get('first_digit')}**")
+        if eb.get("last_digits"):
+            signals.append(f"eBay: últimos 2 dígitos **{eb.get('last_digits')}**")
+
+    if pp.get("reported") is True:
+        if pp.get("first_digit"):
+            signals.append(f"PayPal: primer dígito **{pp.get('first_digit')}**")
+        if pp.get("last_digits"):
+            cnt = pp.get("last_digits_count")
+            suffix = f" (x{cnt})" if cnt else ""
+            signals.append(f"PayPal: últimos dígitos **{pp.get('last_digits')}**{suffix}")
+        if pp.get("length_without_cc") is not None:
+            signals.append(f"PayPal: longitud sin CC **{pp.get('length_without_cc')}**")
+
+    if signals:
+        st.markdown("**Email2PhoneNumber (indicadores parciales de teléfono)**")
+        for s in signals:
+            st.markdown(f"- {s}")
+    else:
+        st.info("Email2PhoneNumber: no se encontraron indicadores.")
+
+    # salida cruda (stdout parseado/limpio lo devuelve en parsed['messages'])
+    with st.expander("Salida Email2PhoneNumber (parseada)", expanded=False):
+        msgs = parsed.get("messages") or []
+        if msgs:
+            st.code("\n".join(msgs), language="text")
+        else:
+            st.code(e2p.get("stdout") or "(sin stdout)", language="text")
+
+    # debugging extra (opcional)
+    with st.expander("Detalles técnicos Email2PhoneNumber", expanded=False):
+        st.json({
+            "elapsed": e2p.get("elapsed"),
+            "returncode": e2p.get("returncode"),
+            "repo": e2p.get("repo"),
+            "dependency_check": e2p.get("dependency_check"),
+        })

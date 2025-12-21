@@ -60,7 +60,7 @@ try:
         """
         GHunt gmaps.get_reviews sin progress bar y con fallback defensivo.
         """
-        nonlocal _gmaps_warning_emitted
+        global _gmaps_warning_emitted
 
         original_bar = getattr(ghunt_gmaps, "alive_bar", None)
         ghunt_gmaps.alive_bar = _silent_bar  # type: ignore[assignment]

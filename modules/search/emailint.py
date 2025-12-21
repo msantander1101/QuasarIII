@@ -150,21 +150,6 @@ def _annotate_candidates(target_email: str, candidates: List[str]) -> List[Dict[
     return out
 
 
-def _build_source_link(email: str, source_name: str, base_url: str = "") -> Dict[str, Any]:
-    """
-    Crea un enlace seguro hacia una fuente externa.
-    """
-    encoded_email = urllib.parse.quote_plus(email)
-    url = base_url or f"https://www.google.com/search?q={encoded_email}+{urllib.parse.quote_plus(source_name)}"
-
-    return {
-        "name": source_name,
-        "url": url,
-        "source": source_name.lower().replace(" ", "_"),
-        "email": email,
-    }
-
-
 def build_email_source_links(email: str) -> Dict[str, List[Dict[str, Any]]]:
     """
     Enlaces listos para búsqueda manual en fuentes OSINT de correo.
@@ -193,7 +178,7 @@ def build_email_source_links(email: str) -> Dict[str, List[Dict[str, Any]]]:
 
 
 # --------------------------------------------------
-# EMAIL2PHONENUMBER (SCRAPE PAYPAL/EBAY/LASTPASS)
+# EMAIL2PHONENUMBER
 # --------------------------------------------------
 
 
@@ -244,18 +229,100 @@ def _ensure_email2phone_dependencies() -> Dict[str, Any]:
     return result
 
 
-def _patch_email2phonenumber_script(repo_path: Path) -> Dict[str, Any]:
-    """
-    Parchea email2phonenumber.py para que si un proveedor falla, continúe con los demás.
-    Idempotente: si ya está parcheado, no hace nada.
+_QUASAR_PATCH_MARKER_V2 = "# QUASAR_PATCH_V2_CONTINUE_ON_ERROR"
 
-    Objetivo: si falla eBay por DNS/política, que igualmente intente PayPal/LastPass.
+
+def _replace_function_body_by_indent(text: str, func_def_prefix: str, new_body_lines: List[str]) -> Tuple[str, bool]:
+    """
+    Reemplaza el cuerpo de una función identificada por `func_def_prefix` (ej: 'def start_scrapping(')
+    usando heurística por indentación.
+
+    Devuelve (nuevo_texto, cambiado).
+    """
+    lines = text.splitlines(True)  # keepends
+    # localizar def
+    def_idx = None
+    for i, ln in enumerate(lines):
+        if ln.lstrip().startswith(func_def_prefix):
+            def_idx = i
+            break
+    if def_idx is None:
+        return text, False
+
+    # indent de la def y del cuerpo
+    def_line = lines[def_idx]
+    def_indent = def_line[:len(def_line) - len(def_line.lstrip())]
+    body_indent = def_indent + "    "
+
+    # encontrar inicio de cuerpo (primera línea después de def)
+    start = def_idx + 1
+    # saltar líneas vacías / comments / docstring inicial de la función
+    # pero: nos vale reemplazar desde la primera línea que pertenezca al cuerpo por indent.
+    body_start = None
+    for j in range(start, len(lines)):
+        ln = lines[j]
+        if ln.strip() == "":
+            continue
+        # si es docstring """ al inicio
+        if ln.startswith(body_indent + '"""') or ln.startswith(body_indent + "'''"):
+            # consumir hasta fin docstring
+            quote = '"""' if '"""' in ln else "'''"
+            k = j + 1
+            while k < len(lines) and quote not in lines[k]:
+                k += 1
+            # incluir la línea de cierre si está
+            j = k
+            continue
+        if ln.startswith(body_indent):
+            body_start = j
+        else:
+            body_start = j  # cuerpo vacío raro; reemplazamos igual desde aquí
+        break
+
+    if body_start is None:
+        body_start = start
+
+    # encontrar final del cuerpo: primera línea con indent <= def_indent (y no vacía)
+    body_end = len(lines)
+    for j in range(body_start, len(lines)):
+        ln = lines[j]
+        if ln.strip() == "":
+            continue
+        indent = ln[:len(ln) - len(ln.lstrip())]
+        if len(indent) <= len(def_indent) and not ln.startswith(body_indent):
+            body_end = j
+            break
+
+    # construir nuevo texto
+    new_lines = []
+    new_lines.extend(lines[:body_start])
+
+    # insertar nuevo cuerpo con indent correcto
+    for raw in new_body_lines:
+        if raw.endswith("\n"):
+            new_lines.append(body_indent + raw)
+        else:
+            new_lines.append(body_indent + raw + "\n")
+
+    new_lines.extend(lines[body_end:])
+    return "".join(new_lines), True
+
+
+def _patch_email2phonenumber_script_v2(repo_path: Path, force: bool = False) -> Dict[str, Any]:
+    """
+    Parche V2: reemplaza el CUERPO completo de start_scrapping para que falle un proveedor
+    y continúe con los demás (try/except por scraper).
+
+    - Idempotente por marker V2.
+    - Si force=True, repatchea aunque ya tenga marker.
     """
     info: Dict[str, Any] = {
         "source": "email2phonenumber_patch",
+        "version": "v2",
         "patched": False,
         "status": "noop",
         "path": str(repo_path),
+        "forced": force,
     }
 
     script_path = repo_path / "email2phonenumber.py"
@@ -263,55 +330,48 @@ def _patch_email2phonenumber_script(repo_path: Path) -> Dict[str, Any]:
         info["status"] = "missing_script"
         return info
 
-    marker = "# QUASAR_PATCH_CONTINUE_ON_ERROR"
     try:
         text = script_path.read_text(encoding="utf-8", errors="ignore")
 
-        if marker in text:
+        if (not force) and (_QUASAR_PATCH_MARKER_V2 in text):
             info["patched"] = True
-            info["status"] = "already_patched"
+            info["status"] = "already_patched_v2"
             return info
 
-        if "def start_scrapping(" not in text:
+        # cuerpo nuevo (mínimo y robusto)
+        new_body = [
+            _QUASAR_PATCH_MARKER_V2,
+            "print('Starting scraping online services...')",
+            "try:",
+            "    print('Scraping Ebay...')",
+            "    scrape_ebay(email)",
+            "except Exception as _exc:",
+            "    print('[warn] Scraping Ebay failed:', _exc)",
+            "try:",
+            "    print('Scraping Paypal...')",
+            "    scrape_paypal(email)",
+            "except Exception as _exc:",
+            "    print('[warn] Scraping Paypal failed:', _exc)",
+            "try:",
+            "    print('Scraping Lastpass...')",
+            "    scrape_lastpass(email)",
+            "except Exception as _exc:",
+            "    print('[warn] Scraping Lastpass failed:', _exc)",
+        ]
+
+        new_text, changed = _replace_function_body_by_indent(
+            text=text,
+            func_def_prefix="def start_scrapping(",
+            new_body_lines=new_body,
+        )
+
+        if not changed:
             info["status"] = "start_function_not_found"
             return info
 
-        # Reemplazo pragmático por líneas exactas (si el upstream cambia, no rompemos: solo no parchea)
-        replacements = {
-            "    scrape_ebay(email)\n": (
-                f"    {marker}\n"
-                "    try:\n"
-                "        scrape_ebay(email)\n"
-                "    except Exception as _exc:\n"
-                "        print(\"[warn] Scraping Ebay failed:\", _exc)\n"
-            ),
-            "    scrape_paypal(email)\n": (
-                "    try:\n"
-                "        scrape_paypal(email)\n"
-                "    except Exception as _exc:\n"
-                "        print(\"[warn] Scraping Paypal failed:\", _exc)\n"
-            ),
-            "    scrape_lastpass(email)\n": (
-                "    try:\n"
-                "        scrape_lastpass(email)\n"
-                "    except Exception as _exc:\n"
-                "        print(\"[warn] Scraping Lastpass failed:\", _exc)\n"
-            ),
-        }
-
-        changed = False
-        for old, new in replacements.items():
-            if old in text:
-                text = text.replace(old, new)
-                changed = True
-
-        if not changed:
-            info["status"] = "no_expected_lines_found"
-            return info
-
-        script_path.write_text(text, encoding="utf-8")
+        script_path.write_text(new_text, encoding="utf-8")
         info["patched"] = True
-        info["status"] = "patched"
+        info["status"] = "patched_v2"
         return info
 
     except Exception as exc:
@@ -333,11 +393,11 @@ def _ensure_email2phonenumber_repo(base_path: Optional[Path] = None) -> Tuple[Op
     script_path = repo_path / "email2phonenumber.py"
     if script_path.is_file():
         info["status"] = "present"
-        # parche best-effort (no falla el flujo si no puede)
+        # best-effort patch v2
         try:
-            _patch_email2phonenumber_script(repo_path)
+            _patch_email2phonenumber_script_v2(repo_path)
         except Exception:
-            logger.exception("email2phonenumber patch error (present)")
+            logger.exception("email2phonenumber patch v2 error (present)")
         return repo_path, info
 
     try:
@@ -373,11 +433,11 @@ def _ensure_email2phonenumber_repo(base_path: Optional[Path] = None) -> Tuple[Op
             })
             return None, info
 
-        # parche best-effort (tras clone)
+        # patch v2
         try:
-            _patch_email2phonenumber_script(repo_path)
+            _patch_email2phonenumber_script_v2(repo_path)
         except Exception:
-            logger.exception("email2phonenumber patch error (cloned)")
+            logger.exception("email2phonenumber patch v2 error (cloned)")
 
         return repo_path, info
 
@@ -514,7 +574,6 @@ def _parse_email2phonenumber_output(text: str) -> Dict[str, Any]:
 def email2phonenumber_scrape(email: str, quiet_mode: bool = False) -> Dict[str, Any]:
     """
     Ejecuta `email2phonenumber.py scrape -e <email>` y devuelve salida parseada.
-    Con parche: si falla un proveedor, sigue con el siguiente.
     """
     start = time.time()
     result: Dict[str, Any] = {
@@ -544,19 +603,13 @@ def email2phonenumber_scrape(email: str, quiet_mode: bool = False) -> Dict[str, 
         result["error"] = repo_info.get("error", "repo_unavailable")
         return result
 
-    # best-effort patch info (por si quieres mostrarlo)
-    try:
-        result["patch"] = _patch_email2phonenumber_script(Path(repo_path))
-    except Exception as exc:
-        result["patch"] = {"source": "email2phonenumber_patch", "status": "error", "error": str(exc)}
-
     deps_info = _ensure_email2phone_dependencies()
     result["dependency_check"] = deps_info
     if deps_info.get("installed") is False:
         result["error"] = deps_info.get("error", "dependency_install_failed")
         return result
 
-    # Silenciamos SyntaxWarning del script de terceros
+    # 1) Intento normal (con patch v2 ya aplicado best-effort)
     cmd = [sys.executable, "-W", "ignore::SyntaxWarning", "email2phonenumber.py", "scrape", "-e", email]
     if quiet_mode:
         cmd.append("-q")
@@ -571,8 +624,26 @@ def email2phonenumber_scrape(email: str, quiet_mode: bool = False) -> Dict[str, 
             check=False,
         )
 
-        combined = _strip_ansi((proc.stdout or "") + "\n" + (proc.stderr or ""))
+        # Si el script está roto por indent, repatcheamos V2 forzado y reintentamos una vez
+        stderr_txt = (proc.stderr or "")
+        if "IndentationError" in stderr_txt:
+            result["error"] = "patch_broken"
+            # forzar repatch v2
+            patch_info = _patch_email2phonenumber_script_v2(Path(repo_path), force=True)
+            result["patch"] = patch_info
 
+            proc2 = subprocess.run(
+                cmd,
+                cwd=str(repo_path),
+                capture_output=True,
+                text=True,
+                timeout=240,
+                check=False,
+            )
+            proc = proc2  # usar el segundo resultado
+
+        # normal parse
+        combined = _strip_ansi((proc.stdout or "") + "\n" + (proc.stderr or ""))
         result.update({
             "stdout": (proc.stdout or "").strip(),
             "stderr": (proc.stderr or "").strip(),
@@ -581,21 +652,21 @@ def email2phonenumber_scrape(email: str, quiet_mode: bool = False) -> Dict[str, 
             "success": proc.returncode == 0,
         })
 
-        # Si no fue success, clasificamos. Si el parche funciona, lo normal es que NO llegue aquí por DNS.
-        if proc.returncode != 0:
-            errtxt = proc.stderr or ""
+        # patch info si no lo pusimos antes
+        if result.get("patch") is None:
+            result["patch"] = _patch_email2phonenumber_script_v2(Path(repo_path), force=False)
+
+        if proc.returncode != 0 and not result.get("error"):
             dns_markers = (
                 "NameResolutionError",
                 "Failed to resolve",
                 "socket.gaierror",
                 "Temporary failure in name resolution",
             )
-            if any(m in errtxt for m in dns_markers):
+            if any(m in (proc.stderr or "") for m in dns_markers):
                 result["error"] = "dns_resolution_failed"
-            elif "requests.exceptions.ConnectionError" in errtxt or "ConnectionError" in errtxt:
-                result["error"] = "network_connection_error"
-            elif "Timeout" in errtxt or "ReadTimeout" in errtxt:
-                result["error"] = "timeout"
+            elif "IndentationError" in (proc.stderr or ""):
+                result["error"] = "patch_broken"
             else:
                 result["error"] = "execution_failed"
 
@@ -612,9 +683,8 @@ def email2phonenumber_scrape(email: str, quiet_mode: bool = False) -> Dict[str, 
 
 
 # --------------------------------------------------
-# EMAILFINDER (CLI opcional)
+# EMAILFINDER
 # --------------------------------------------------
-
 
 def emailfinder_lookup(email: str) -> Dict[str, Any]:
     """
@@ -653,15 +723,10 @@ def emailfinder_lookup(email: str) -> Dict[str, Any]:
     try:
         domain = _extract_domain(email)
         if not domain:
-            return {
-                "source": "emailfinder",
-                "success": False,
-                "error": "email sin dominio válido",
-            }
+            return {"source": "emailfinder", "success": False, "error": "email sin dominio válido"}
 
         emailfinder_bin = _resolve_emailfinder()
 
-        # instalar si no existe
         if not emailfinder_bin:
             install_proc = subprocess.run(
                 ["go", "install", "github.com/rix4uni/emailfinder@latest"],
@@ -724,15 +789,8 @@ def emailfinder_lookup(email: str) -> Dict[str, Any]:
 
     except subprocess.TimeoutExpired:
         return {"source": "emailfinder", "success": False, "error": "emailfinder timeout"}
-
     except FileNotFoundError as exc:
-        return {
-            "source": "emailfinder",
-            "success": False,
-            "error": "go/emailfinder no encontrado en runtime",
-            "details": str(exc),
-        }
-
+        return {"source": "emailfinder", "success": False, "error": "go/emailfinder no encontrado en runtime", "details": str(exc)}
     except Exception as exc:
         logger.exception("EmailFinder error")
         return {"source": "emailfinder", "success": False, "error": str(exc)}
@@ -741,7 +799,6 @@ def emailfinder_lookup(email: str) -> Dict[str, Any]:
 # --------------------------------------------------
 # HIBP
 # --------------------------------------------------
-
 
 def hibp_lookup(email: str, api_key: Optional[str]) -> Dict[str, Any]:
     if not api_key:
@@ -757,10 +814,8 @@ def hibp_lookup(email: str, api_key: Optional[str]) -> Dict[str, Any]:
         if r.status_code == 200:
             data = r.json()
             return {"source": "hibp", "breached": True, "breach_count": len(data), "details": data}
-
         if r.status_code == 404:
             return {"source": "hibp", "breached": False, "breach_count": 0}
-
         if r.status_code == 401:
             return {"source": "hibp", "error": "invalid_api_key"}
 
@@ -774,7 +829,6 @@ def hibp_lookup(email: str, api_key: Optional[str]) -> Dict[str, Any]:
 # --------------------------------------------------
 # GHUNT
 # --------------------------------------------------
-
 
 def ghunt_lookup(email: str) -> Dict[str, Any]:
     if not GHUNT_AVAILABLE:
@@ -795,7 +849,6 @@ def ghunt_lookup(email: str) -> Dict[str, Any]:
         buffer.close()
 
         return {"source": "ghunt", "success": True, "data": raw, "output": output, "warnings": list(GHUNT_WARNINGS)}
-
     except Exception as e:
         logger.exception("GHunt error")
         return {"source": "ghunt", "success": False, "error": str(e)}
@@ -804,7 +857,6 @@ def ghunt_lookup(email: str) -> Dict[str, Any]:
 # --------------------------------------------------
 # ENRICHMENT (HIBP/GHUNT) PARA CANDIDATOS
 # --------------------------------------------------
-
 
 def enrich_candidate_emails(emails: List[str], user_id: int, max_emails: int = 10) -> List[Dict[str, Any]]:
     hibp_key = None
@@ -821,13 +873,8 @@ def enrich_candidate_emails(emails: List[str], user_id: int, max_emails: int = 1
         seen.add(e_norm)
 
         item: Dict[str, Any] = {"email": e_norm}
-
         item["hibp"] = hibp_lookup(e_norm, hibp_key) if hibp_key else {"source": "hibp", "error": "no_api_key"}
-        item["ghunt"] = (
-            ghunt_lookup(e_norm)
-            if e_norm.endswith(("@gmail.com", "@googlemail.com"))
-            else {"source": "ghunt", "skipped": "non_gmail"}
-        )
+        item["ghunt"] = ghunt_lookup(e_norm) if e_norm.endswith(("@gmail.com", "@googlemail.com")) else {"source": "ghunt", "skipped": "non_gmail"}
 
         out.append(item)
         if len(out) >= max_emails:
@@ -840,18 +887,15 @@ def enrich_candidate_emails(emails: List[str], user_id: int, max_emails: int = 1
 # VERIFICATION
 # --------------------------------------------------
 
-
 def verify_deliverability(email: str) -> Dict[str, Any]:
     if not verify_email_format(email):
         return {"source": "verification", "email": email, "deliverable": False, "reason": "invalid_format"}
-
     return {"source": "verification", "email": email, "deliverable": "unknown"}
 
 
 # --------------------------------------------------
 # MAIN ENTRY POINT
 # --------------------------------------------------
-
 
 def search_email_info(email: str, user_id: int = 1) -> Dict[str, Any]:
     start = time.time()
@@ -906,7 +950,6 @@ def search_email_info(email: str, user_id: int = 1) -> Dict[str, Any]:
 # --------------------------------------------------
 # COMPAT
 # --------------------------------------------------
-
 
 def check_email_breach(email: str, user_id: int = 1) -> Dict[str, Any]:
     hibp_key = None

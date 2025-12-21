@@ -1,5 +1,3 @@
-# ui/pages/person_search/components/web_email_blocks.py
-
 import streamlit as st
 
 
@@ -129,9 +127,6 @@ def _email2phone_score(parsed: dict) -> dict:
 
 
 def _render_email2phonenumber_operativo(e2p: dict, email_value: str = ""):
-    """
-    Render operativo + guard anti-duplicado por email en el mismo run de Streamlit.
-    """
     # guard anti-duplicado (por email)
     guard_key = f"e2p_rendered::{email_value or e2p.get('email','')}"
     if st.session_state.get(guard_key):
@@ -161,6 +156,7 @@ def _render_email2phonenumber_operativo(e2p: dict, email_value: str = ""):
             "timeout": "Timeout del scraping (posible bloqueo o red lenta).",
             "execution_failed": "Ejecución fallida (revisar stderr).",
             "invalid_email": "Email inválido.",
+            "patch_broken": "El script quedó con un parche roto (IndentationError). Se ha intentado reparar automáticamente.",
         }.get(err, str(err))
 
         st.error(f"🔴 {human}")
@@ -169,7 +165,6 @@ def _render_email2phonenumber_operativo(e2p: dict, email_value: str = ""):
         if repo.get("status") or repo.get("path"):
             st.caption(f"Repo: {repo.get('status')} — {repo.get('path')}")
 
-        # info del parche (por si quieres verlo)
         patch = e2p.get("patch") or {}
         if patch.get("status"):
             st.caption(f"Patch: {patch.get('status')}")
@@ -205,8 +200,6 @@ def _render_email2phonenumber_operativo(e2p: dict, email_value: str = ""):
         f"— tiempo: `{e2p.get('elapsed', 0)}s`"
     )
 
-    # Si el parche está activo, puede que un proveedor falle pero el script termine OK.
-    # Aun así, si quieres visibilidad, dejamos el "Detalle" con warnings/mensajes.
     signals = meta.get("signals") or []
     if signals:
         for s in signals[:6]:

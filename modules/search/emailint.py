@@ -6,6 +6,7 @@ Incluye:
   - GHunt (solo Gmail / Google)
   - Verificación básica
   - Enlaces OSINT pasivos (para abrir manualmente desde UI)
+  - EmailFinder (lead generation por dominio + parsing + cruce controlado)
 NO incluye:
   - Pastes / Leaks (solo bajo demanda desde UI)
 """
@@ -17,7 +18,7 @@ import urllib.parse
 import os
 import shutil
 import subprocess
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from requests import Session
 import io
 import contextlib
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------
 
 EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[A-Za-z]{2,}$")
+EMAIL_EXTRACT_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[A-Za-z]{2,}")
 TIMEOUT = 25
 
 session = Session()
@@ -103,6 +105,42 @@ def verify_email_format(email: str) -> bool:
     return isinstance(email, str) and bool(EMAIL_RE.match(email.strip()))
 
 
+def _extract_emails_from_text(text: str) -> List[str]:
+    """
+    Extrae emails de cualquier salida de texto (EmailFinder suele mezclar líneas).
+    Devuelve lista deduplicada y ordenada.
+    """
+    if not text:
+        return []
+    found = EMAIL_EXTRACT_RE.findall(text)
+    uniq = sorted({e.strip().lower() for e in found if verify_email_format(e)})
+    return uniq
+
+
+def _domain_of(email: str) -> str:
+    return email.split("@", 1)[1].lower() if isinstance(email, str) and "@" in email else ""
+
+
+def _annotate_candidates(target_email: str, candidates: List[str]) -> List[Dict[str, Any]]:
+    """
+    Marca:
+      - exact_match: si el candidato es exactamente el email investigado
+      - same_domain: si coincide el dominio
+    """
+    target = (target_email or "").strip().lower()
+    target_domain = _domain_of(target)
+
+    out: List[Dict[str, Any]] = []
+    for c in candidates:
+        c_norm = (c or "").strip().lower()
+        out.append({
+            "email": c_norm,
+            "exact_match": c_norm == target,
+            "same_domain": bool(target_domain) and _domain_of(c_norm) == target_domain,
+        })
+    return out
+
+
 def _build_source_link(email: str, source_name: str, base_url: str = "") -> Dict[str, Any]:
     """
     Crea un enlace seguro hacia una fuente externa.
@@ -128,12 +166,13 @@ def build_email_source_links(email: str) -> Dict[str, List[Dict[str, Any]]]:
     No ejecuta llamadas activas: solo devuelve URLs de búsqueda
     para que el analista pueda abrirlas desde la UI.
     """
+    # Nota: EmailFinder trabaja por DOMINIO; el command aquí es orientativo (modo stdin)
     lead_sources = [
         {
             "name": "EmailFinder",
             "source": "emailfinder",
             "url": "https://github.com/rix4uni/EmailFinder",
-            "command": "emailfinder -e <email>",
+            "command": 'echo "<domain>" | emailfinder',
             "install": "go install github.com/rix4uni/emailfinder@latest",
             "confidence": "media",
             "type": "lead_generation",
@@ -157,89 +196,134 @@ def build_email_source_links(email: str) -> Dict[str, List[Dict[str, Any]]]:
 
 
 def emailfinder_lookup(email: str) -> Dict[str, Any]:
-    install_hint = "go install github.com/rix4uni/emailfinder@latest"
+    """
+    EmailFinder OSINT real:
+    - Extrae dominio del email
+    - Instala emailfinder si no existe
+    - Ejecuta usando STDIN (modo oficial)
+    - Parse: lista de emails deduplicada
+    - Marca coincidencias con email investigado
+    """
 
-    # 1) Intentar localizar binario en PATH
-    resolved_cli = shutil.which("emailfinder")
+    def _resolve_emailfinder() -> Optional[str]:
+        path_bin = shutil.which("emailfinder")
+        if path_bin:
+            return path_bin
 
-    # 2) Fallbacks típicos en entornos Go
-    if not resolved_cli:
-        home_go_bin = os.path.expanduser("~/go/bin/emailfinder")
-        env_gopath = os.environ.get("GOPATH")
-        env_go_bin = os.path.join(env_gopath, "bin", "emailfinder") if env_gopath else None
+        candidates = [
+            os.path.expanduser("~/go/bin/emailfinder"),
+        ]
 
-        for candidate in (home_go_bin, env_go_bin):
-            if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-                resolved_cli = candidate
-                break
+        gopath = os.environ.get("GOPATH")
+        if gopath:
+            candidates.append(os.path.join(gopath, "bin", "emailfinder"))
 
-    # 3) Fallback a script python (si existe)
-    resolved_script = None
-    script_candidates = ["emailfinder.py", shutil.which("emailfinder.py")]
-    for candidate in script_candidates:
-        if candidate and os.path.exists(candidate):
-            resolved_script = candidate
-            break
+        for c in candidates:
+            if c and os.path.isfile(c) and os.access(c, os.X_OK):
+                return c
 
-    if resolved_cli:
-        command = [resolved_cli, "-e", email]
-        command_str = f"{resolved_cli} -e <email>"
-    elif resolved_script:
-        command = ["python3", resolved_script, "-e", email]
-        command_str = "python3 emailfinder.py -e <email>"
-    else:
-        return {
-            "source": "emailfinder",
-            "success": False,
-            "error": "EmailFinder no encontrado",
-            "command": "emailfinder -e <email>",
-            "install": install_hint,
-        }
+        return None
+
+    def _extract_domain(email_value: str) -> Optional[str]:
+        if "@" not in email_value:
+            return None
+        return email_value.split("@", 1)[1].lower()
 
     try:
+        domain = _extract_domain(email)
+        if not domain:
+            return {
+                "source": "emailfinder",
+                "success": False,
+                "error": "email sin dominio válido",
+            }
+
+        emailfinder_bin = _resolve_emailfinder()
+
+        # 1️⃣ instalar si no existe
+        if not emailfinder_bin:
+            install_proc = subprocess.run(
+                ["go", "install", "github.com/rix4uni/emailfinder@latest"],
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+            )
+
+            if install_proc.returncode != 0:
+                return {
+                    "source": "emailfinder",
+                    "success": False,
+                    "error": "fallo instalando emailfinder",
+                    "stderr": (install_proc.stderr or "").strip(),
+                    "install": "go install github.com/rix4uni/emailfinder@latest",
+                }
+
+            emailfinder_bin = _resolve_emailfinder()
+            if not emailfinder_bin:
+                return {
+                    "source": "emailfinder",
+                    "success": False,
+                    "error": "emailfinder instalado pero no localizado",
+                    "hint": "Asegura que ~/go/bin o $GOPATH/bin está en PATH",
+                }
+
+        # 2️⃣ ejecutar usando STDIN (modo oficial)
+        cmd = [emailfinder_bin]
         proc = subprocess.run(
-            command,
+            cmd,
+            input=f"{domain}\n",
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=120,
             check=False,
         )
 
-        output = (proc.stdout or "").strip()
-        error_output = (proc.stderr or "").strip()
+        raw_out = (proc.stdout or "").strip()
+        raw_err = (proc.stderr or "").strip()
+
+        emails = _extract_emails_from_text(raw_out)
+        candidates = _annotate_candidates(email, emails)
 
         return {
             "source": "emailfinder",
             "success": proc.returncode == 0,
+            "domain": domain,
+            "mode": "stdin",
+            "command": f'echo "{domain}" | emailfinder',
+            "output": raw_out,
+            "stderr": raw_err,
             "returncode": proc.returncode,
-            "output": output,
-            "stderr": error_output,
-            "command": command_str,
-            "install": install_hint,
+            "emails": emails,                 # lista única
+            "candidates": candidates,         # lista anotada
+            "stats": {
+                "emails_found": len(emails),
+                "exact_matches": sum(1 for x in candidates if x.get("exact_match")),
+                "same_domain": sum(1 for x in candidates if x.get("same_domain")),
+            },
         }
-    except FileNotFoundError:
-        return {
-            "source": "emailfinder",
-            "success": False,
-            "error": "runtime de EmailFinder no encontrado (python3/go)",
-            "command": command_str,
-            "install": install_hint,
-        }
+
     except subprocess.TimeoutExpired:
         return {
             "source": "emailfinder",
             "success": False,
             "error": "emailfinder timeout",
-            "command": command_str,
-            "install": install_hint,
         }
-    except Exception as exc:  # pragma: no cover
+
+    except FileNotFoundError as exc:
+        return {
+            "source": "emailfinder",
+            "success": False,
+            "error": "go/emailfinder no encontrado en runtime",
+            "details": str(exc),
+        }
+
+    except Exception as exc:
         logger.exception("EmailFinder error")
         return {
             "source": "emailfinder",
             "success": False,
             "error": str(exc),
-            "command": "python3 emailfinder.py -e <email>",
         }
 
 
@@ -321,6 +405,57 @@ def ghunt_lookup(email: str) -> Dict[str, Any]:
 
 
 # --------------------------------------------------
+# ENRICHMENT (HIBP/GHUNT) PARA CANDIDATOS
+# --------------------------------------------------
+
+
+def enrich_candidate_emails(
+    emails: List[str],
+    user_id: int,
+    max_emails: int = 10
+) -> List[Dict[str, Any]]:
+    """
+    Enriquecimiento controlado:
+    - HIBP para cada email si hay key
+    - GHunt solo para gmail/googlemail
+    - limita a max_emails para evitar rate-limit / latencia
+    """
+    hibp_key = None
+    if hasattr(config_manager, "get_config"):
+        hibp_key = config_manager.get_config(user_id, "hibp")
+
+    out: List[Dict[str, Any]] = []
+    seen = set()
+
+    for e in emails:
+        e_norm = (e or "").strip().lower()
+        if not e_norm or e_norm in seen:
+            continue
+        seen.add(e_norm)
+
+        item: Dict[str, Any] = {"email": e_norm}
+
+        # HIBP
+        if hibp_key:
+            item["hibp"] = hibp_lookup(e_norm, hibp_key)
+        else:
+            item["hibp"] = {"source": "hibp", "error": "no_api_key"}
+
+        # GHunt (solo gmail)
+        if e_norm.endswith(("@gmail.com", "@googlemail.com")):
+            item["ghunt"] = ghunt_lookup(e_norm)
+        else:
+            item["ghunt"] = {"source": "ghunt", "skipped": "non_gmail"}
+
+        out.append(item)
+
+        if len(out) >= max_emails:
+            break
+
+    return out
+
+
+# --------------------------------------------------
 # VERIFICATION
 # --------------------------------------------------
 
@@ -359,6 +494,7 @@ def search_email_info(email: str, user_id: int = 1) -> Dict[str, Any]:
         "hibp": None,
         "ghunt": None,
         "emailfinder": None,
+        "emailfinder_enriched": [],
         "verification": None,
         "sources": {},
         "errors": [],
@@ -383,6 +519,15 @@ def search_email_info(email: str, user_id: int = 1) -> Dict[str, Any]:
 
         # ---------------- EMAILFINDER ----------------
         out["emailfinder"] = emailfinder_lookup(email)
+
+        # ---------------- CRUCE CANDIDATOS (HIBP/GHUNT) ----------------
+        ef = out.get("emailfinder") or {}
+        found_emails = ef.get("emails") or []
+        out["emailfinder_enriched"] = enrich_candidate_emails(
+            found_emails,
+            user_id=user_id,
+            max_emails=10,
+        )
 
         # ---------------- VERIFICATION ----------------
         out["verification"] = verify_deliverability(email)

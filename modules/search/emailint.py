@@ -7,7 +7,7 @@ Incluye:
   - Verificación básica
   - Enlaces OSINT pasivos (para abrir manualmente desde UI)
   - EmailFinder (lead generation por dominio + parsing + cruce controlado)
-  - Email2PhoneNumber (scrape Paypal/eBay/LastPass)  ✅
+  - Email2PhoneNumber (scrape Paypal/eBay/LastPass)
 NO incluye:
   - Pastes / Leaks (solo bajo demanda desde UI)
 """
@@ -153,9 +153,6 @@ def _annotate_candidates(target_email: str, candidates: List[str]) -> List[Dict[
 def _build_source_link(email: str, source_name: str, base_url: str = "") -> Dict[str, Any]:
     """
     Crea un enlace seguro hacia una fuente externa.
-
-    Si se proporciona base_url se utiliza directamente, de lo contrario
-    se genera una búsqueda web con el nombre de la fuente.
     """
     encoded_email = urllib.parse.quote_plus(email)
     url = base_url or f"https://www.google.com/search?q={encoded_email}+{urllib.parse.quote_plus(source_name)}"
@@ -171,11 +168,7 @@ def _build_source_link(email: str, source_name: str, base_url: str = "") -> Dict
 def build_email_source_links(email: str) -> Dict[str, List[Dict[str, Any]]]:
     """
     Enlaces listos para búsqueda manual en fuentes OSINT de correo.
-
-    No ejecuta llamadas activas: solo devuelve URLs de búsqueda
-    para que el analista pueda abrirlas desde la UI.
     """
-    # Nota: EmailFinder trabaja por DOMINIO; el command aquí es orientativo (modo stdin)
     lead_sources = [
         {
             "name": "EmailFinder",
@@ -552,7 +545,7 @@ def emailfinder_lookup(email: str) -> Dict[str, Any]:
 
         emailfinder_bin = _resolve_emailfinder()
 
-        # 1️⃣ instalar si no existe
+        # instalar si no existe
         if not emailfinder_bin:
             install_proc = subprocess.run(
                 ["go", "install", "github.com/rix4uni/emailfinder@latest"],
@@ -580,10 +573,8 @@ def emailfinder_lookup(email: str) -> Dict[str, Any]:
                     "hint": "Asegura que ~/go/bin o $GOPATH/bin está en PATH",
                 }
 
-        # 2️⃣ ejecutar usando STDIN (modo oficial)
-        cmd = [emailfinder_bin]
         proc = subprocess.run(
-            cmd,
+            [emailfinder_bin],
             input=f"{domain}\n",
             capture_output=True,
             text=True,
@@ -606,8 +597,8 @@ def emailfinder_lookup(email: str) -> Dict[str, Any]:
             "output": raw_out,
             "stderr": raw_err,
             "returncode": proc.returncode,
-            "emails": emails,                 # lista única
-            "candidates": candidates,         # lista anotada
+            "emails": emails,
+            "candidates": candidates,
             "stats": {
                 "emails_found": len(emails),
                 "exact_matches": sum(1 for x in candidates if x.get("exact_match")),
@@ -616,11 +607,7 @@ def emailfinder_lookup(email: str) -> Dict[str, Any]:
         }
 
     except subprocess.TimeoutExpired:
-        return {
-            "source": "emailfinder",
-            "success": False,
-            "error": "emailfinder timeout",
-        }
+        return {"source": "emailfinder", "success": False, "error": "emailfinder timeout"}
 
     except FileNotFoundError as exc:
         return {
@@ -632,11 +619,7 @@ def emailfinder_lookup(email: str) -> Dict[str, Any]:
 
     except Exception as exc:
         logger.exception("EmailFinder error")
-        return {
-            "source": "emailfinder",
-            "success": False,
-            "error": str(exc),
-        }
+        return {"source": "emailfinder", "success": False, "error": str(exc)}
 
 
 # --------------------------------------------------
@@ -651,21 +634,13 @@ def hibp_lookup(email: str, api_key: Optional[str]) -> Dict[str, Any]:
     try:
         encoded = urllib.parse.quote_plus(email)
         url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{encoded}"
-        headers = {
-            "x-apikey": api_key,
-            "User-Agent": "QuasarIII-EmailInt/1.0",
-        }
+        headers = {"x-apikey": api_key, "User-Agent": "QuasarIII-EmailInt/1.0"}
 
         r = session.get(url, headers=headers, timeout=TIMEOUT)
 
         if r.status_code == 200:
             data = r.json()
-            return {
-                "source": "hibp",
-                "breached": True,
-                "breach_count": len(data),
-                "details": data,
-            }
+            return {"source": "hibp", "breached": True, "breach_count": len(data), "details": data}
 
         if r.status_code == 404:
             return {"source": "hibp", "breached": False, "breach_count": 0}
@@ -703,13 +678,7 @@ def ghunt_lookup(email: str) -> Dict[str, Any]:
         output = buffer.getvalue().strip()
         buffer.close()
 
-        return {
-            "source": "ghunt",
-            "success": True,
-            "data": raw,
-            "output": output,
-            "warnings": list(GHUNT_WARNINGS),
-        }
+        return {"source": "ghunt", "success": True, "data": raw, "output": output, "warnings": list(GHUNT_WARNINGS)}
 
     except Exception as e:
         logger.exception("GHunt error")
@@ -721,17 +690,7 @@ def ghunt_lookup(email: str) -> Dict[str, Any]:
 # --------------------------------------------------
 
 
-def enrich_candidate_emails(
-    emails: List[str],
-    user_id: int,
-    max_emails: int = 10
-) -> List[Dict[str, Any]]:
-    """
-    Enriquecimiento controlado:
-    - HIBP para cada email si hay key
-    - GHunt solo para gmail/googlemail
-    - limita a max_emails para evitar rate-limit / latencia
-    """
+def enrich_candidate_emails(emails: List[str], user_id: int, max_emails: int = 10) -> List[Dict[str, Any]]:
     hibp_key = None
     if hasattr(config_manager, "get_config"):
         hibp_key = config_manager.get_config(user_id, "hibp")
@@ -747,20 +706,10 @@ def enrich_candidate_emails(
 
         item: Dict[str, Any] = {"email": e_norm}
 
-        # HIBP
-        if hibp_key:
-            item["hibp"] = hibp_lookup(e_norm, hibp_key)
-        else:
-            item["hibp"] = {"source": "hibp", "error": "no_api_key"}
-
-        # GHunt (solo gmail)
-        if e_norm.endswith(("@gmail.com", "@googlemail.com")):
-            item["ghunt"] = ghunt_lookup(e_norm)
-        else:
-            item["ghunt"] = {"source": "ghunt", "skipped": "non_gmail"}
+        item["hibp"] = hibp_lookup(e_norm, hibp_key) if hibp_key else {"source": "hibp", "error": "no_api_key"}
+        item["ghunt"] = ghunt_lookup(e_norm) if e_norm.endswith(("@gmail.com", "@googlemail.com")) else {"source": "ghunt", "skipped": "non_gmail"}
 
         out.append(item)
-
         if len(out) >= max_emails:
             break
 
@@ -774,18 +723,9 @@ def enrich_candidate_emails(
 
 def verify_deliverability(email: str) -> Dict[str, Any]:
     if not verify_email_format(email):
-        return {
-            "source": "verification",
-            "email": email,
-            "deliverable": False,
-            "reason": "invalid_format",
-        }
+        return {"source": "verification", "email": email, "deliverable": False, "reason": "invalid_format"}
 
-    return {
-        "source": "verification",
-        "email": email,
-        "deliverable": "unknown",
-    }
+    return {"source": "verification", "email": email, "deliverable": "unknown"}
 
 
 # --------------------------------------------------
@@ -794,10 +734,6 @@ def verify_deliverability(email: str) -> Dict[str, Any]:
 
 
 def search_email_info(email: str, user_id: int = 1) -> Dict[str, Any]:
-    """
-    Email intelligence principal.
-    NO ejecuta pastes.
-    """
     start = time.time()
 
     out = {
@@ -817,38 +753,26 @@ def search_email_info(email: str, user_id: int = 1) -> Dict[str, Any]:
     try:
         email = email.strip()
 
-        # ---------------- HIBP ----------------
         hibp_key = None
         if hasattr(config_manager, "get_config"):
             hibp_key = config_manager.get_config(user_id, "hibp")
-
         out["hibp"] = hibp_lookup(email, hibp_key)
 
-        # ---------------- GHUNT ----------------
         if email.lower().endswith(("@gmail.com", "@googlemail.com")):
             out["ghunt"] = ghunt_lookup(email)
         else:
             out["ghunt"] = {"source": "ghunt", "skipped": "non_gmail"}
 
-        # ---------------- EMAIL2PHONENUMBER ----------------
         out["email2phonenumber"] = email2phonenumber_scrape(email)
 
-        # ---------------- EMAILFINDER ----------------
         out["emailfinder"] = emailfinder_lookup(email)
 
-        # ---------------- CRUCE CANDIDATOS (HIBP/GHUNT) ----------------
         ef = out.get("emailfinder") or {}
         found_emails = ef.get("emails") or []
-        out["emailfinder_enriched"] = enrich_candidate_emails(
-            found_emails,
-            user_id=user_id,
-            max_emails=10,
-        )
+        out["emailfinder_enriched"] = enrich_candidate_emails(found_emails, user_id=user_id, max_emails=10)
 
-        # ---------------- VERIFICATION ----------------
         out["verification"] = verify_deliverability(email)
 
-        # ---------------- ENLACES OSINT ----------------
         out["sources"] = build_email_source_links(email)
 
     except Exception as e:

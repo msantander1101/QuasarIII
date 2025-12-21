@@ -206,7 +206,7 @@ def render_email_block(email_block: dict):
 
         e2p_data = e.get("email2phonenumber")
         if e2p_data:
-            _render_email2phonenumber(e2p_data)
+            _render_email2phonenumber_operativo(e2p_data)
 
         verification_data = e.get("verification")
         if verification_data:

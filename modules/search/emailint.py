@@ -7,7 +7,7 @@ Incluye:
   - Verificación básica
   - Enlaces OSINT pasivos (para abrir manualmente desde UI)
   - EmailFinder (lead generation por dominio + parsing + cruce controlado)
-  - Email2PhoneNumber (scrape Paypal/eBay/LastPass)
+  - Email2PhoneNumber (scrape Paypal/eBay/LastPass) + parche "continuar si falla"
 NO incluye:
   - Pastes / Leaks (solo bajo demanda desde UI)
 """
@@ -244,6 +244,82 @@ def _ensure_email2phone_dependencies() -> Dict[str, Any]:
     return result
 
 
+def _patch_email2phonenumber_script(repo_path: Path) -> Dict[str, Any]:
+    """
+    Parchea email2phonenumber.py para que si un proveedor falla, continúe con los demás.
+    Idempotente: si ya está parcheado, no hace nada.
+
+    Objetivo: si falla eBay por DNS/política, que igualmente intente PayPal/LastPass.
+    """
+    info: Dict[str, Any] = {
+        "source": "email2phonenumber_patch",
+        "patched": False,
+        "status": "noop",
+        "path": str(repo_path),
+    }
+
+    script_path = repo_path / "email2phonenumber.py"
+    if not script_path.is_file():
+        info["status"] = "missing_script"
+        return info
+
+    marker = "# QUASAR_PATCH_CONTINUE_ON_ERROR"
+    try:
+        text = script_path.read_text(encoding="utf-8", errors="ignore")
+
+        if marker in text:
+            info["patched"] = True
+            info["status"] = "already_patched"
+            return info
+
+        if "def start_scrapping(" not in text:
+            info["status"] = "start_function_not_found"
+            return info
+
+        # Reemplazo pragmático por líneas exactas (si el upstream cambia, no rompemos: solo no parchea)
+        replacements = {
+            "    scrape_ebay(email)\n": (
+                f"    {marker}\n"
+                "    try:\n"
+                "        scrape_ebay(email)\n"
+                "    except Exception as _exc:\n"
+                "        print(\"[warn] Scraping Ebay failed:\", _exc)\n"
+            ),
+            "    scrape_paypal(email)\n": (
+                "    try:\n"
+                "        scrape_paypal(email)\n"
+                "    except Exception as _exc:\n"
+                "        print(\"[warn] Scraping Paypal failed:\", _exc)\n"
+            ),
+            "    scrape_lastpass(email)\n": (
+                "    try:\n"
+                "        scrape_lastpass(email)\n"
+                "    except Exception as _exc:\n"
+                "        print(\"[warn] Scraping Lastpass failed:\", _exc)\n"
+            ),
+        }
+
+        changed = False
+        for old, new in replacements.items():
+            if old in text:
+                text = text.replace(old, new)
+                changed = True
+
+        if not changed:
+            info["status"] = "no_expected_lines_found"
+            return info
+
+        script_path.write_text(text, encoding="utf-8")
+        info["patched"] = True
+        info["status"] = "patched"
+        return info
+
+    except Exception as exc:
+        info["status"] = "error"
+        info["error"] = str(exc)
+        return info
+
+
 def _ensure_email2phonenumber_repo(base_path: Optional[Path] = None) -> Tuple[Optional[Path], Dict[str, Any]]:
     """
     Garantiza que el repositorio email2phonenumber esté disponible localmente.
@@ -257,6 +333,11 @@ def _ensure_email2phonenumber_repo(base_path: Optional[Path] = None) -> Tuple[Op
     script_path = repo_path / "email2phonenumber.py"
     if script_path.is_file():
         info["status"] = "present"
+        # parche best-effort (no falla el flujo si no puede)
+        try:
+            _patch_email2phonenumber_script(repo_path)
+        except Exception:
+            logger.exception("email2phonenumber patch error (present)")
         return repo_path, info
 
     try:
@@ -291,6 +372,12 @@ def _ensure_email2phonenumber_repo(base_path: Optional[Path] = None) -> Tuple[Op
                 "error": "email2phonenumber.py not found after clone",
             })
             return None, info
+
+        # parche best-effort (tras clone)
+        try:
+            _patch_email2phonenumber_script(repo_path)
+        except Exception:
+            logger.exception("email2phonenumber patch error (cloned)")
 
         return repo_path, info
 
@@ -427,7 +514,7 @@ def _parse_email2phonenumber_output(text: str) -> Dict[str, Any]:
 def email2phonenumber_scrape(email: str, quiet_mode: bool = False) -> Dict[str, Any]:
     """
     Ejecuta `email2phonenumber.py scrape -e <email>` y devuelve salida parseada.
-    También clasifica fallos comunes de red/DNS.
+    Con parche: si falla un proveedor, sigue con el siguiente.
     """
     start = time.time()
     result: Dict[str, Any] = {
@@ -437,6 +524,7 @@ def email2phonenumber_scrape(email: str, quiet_mode: bool = False) -> Dict[str, 
         "success": False,
         "repo": None,
         "dependency_check": None,
+        "patch": None,
         "stdout": "",
         "stderr": "",
         "returncode": None,
@@ -456,13 +544,19 @@ def email2phonenumber_scrape(email: str, quiet_mode: bool = False) -> Dict[str, 
         result["error"] = repo_info.get("error", "repo_unavailable")
         return result
 
+    # best-effort patch info (por si quieres mostrarlo)
+    try:
+        result["patch"] = _patch_email2phonenumber_script(Path(repo_path))
+    except Exception as exc:
+        result["patch"] = {"source": "email2phonenumber_patch", "status": "error", "error": str(exc)}
+
     deps_info = _ensure_email2phone_dependencies()
     result["dependency_check"] = deps_info
     if deps_info.get("installed") is False:
         result["error"] = deps_info.get("error", "dependency_install_failed")
         return result
 
-    # Silenciamos SyntaxWarning del script de terceros (opcional, pero útil en UI/logs)
+    # Silenciamos SyntaxWarning del script de terceros
     cmd = [sys.executable, "-W", "ignore::SyntaxWarning", "email2phonenumber.py", "scrape", "-e", email]
     if quiet_mode:
         cmd.append("-q")
@@ -487,6 +581,7 @@ def email2phonenumber_scrape(email: str, quiet_mode: bool = False) -> Dict[str, 
             "success": proc.returncode == 0,
         })
 
+        # Si no fue success, clasificamos. Si el parche funciona, lo normal es que NO llegue aquí por DNS.
         if proc.returncode != 0:
             errtxt = proc.stderr or ""
             dns_markers = (
@@ -728,7 +823,11 @@ def enrich_candidate_emails(emails: List[str], user_id: int, max_emails: int = 1
         item: Dict[str, Any] = {"email": e_norm}
 
         item["hibp"] = hibp_lookup(e_norm, hibp_key) if hibp_key else {"source": "hibp", "error": "no_api_key"}
-        item["ghunt"] = ghunt_lookup(e_norm) if e_norm.endswith(("@gmail.com", "@googlemail.com")) else {"source": "ghunt", "skipped": "non_gmail"}
+        item["ghunt"] = (
+            ghunt_lookup(e_norm)
+            if e_norm.endswith(("@gmail.com", "@googlemail.com"))
+            else {"source": "ghunt", "skipped": "non_gmail"}
+        )
 
         out.append(item)
         if len(out) >= max_emails:

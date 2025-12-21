@@ -128,12 +128,29 @@ def _email2phone_score(parsed: dict) -> dict:
     }
 
 
-def _render_email2phonenumber_operativo(e2p: dict):
+def _render_email2phonenumber_operativo(e2p: dict, email_value: str = ""):
+    """
+    Render operativo + guard anti-duplicado por email en el mismo run de Streamlit.
+    """
+    # guard anti-duplicado (por email)
+    guard_key = f"e2p_rendered::{email_value or e2p.get('email','')}"
+    if st.session_state.get(guard_key):
+        return
+    st.session_state[guard_key] = True
+
     if not e2p:
         st.info("Email2PhoneNumber sin datos")
         return
 
     st.markdown("**Email2PhoneNumber (indicadores de teléfono)**")
+
+    def _dns_check(host: str) -> bool:
+        try:
+            import socket
+            socket.getaddrinfo(host, 443)
+            return True
+        except Exception:
+            return False
 
     # errores duros
     if e2p.get("error"):
@@ -152,17 +169,33 @@ def _render_email2phonenumber_operativo(e2p: dict):
         if repo.get("status") or repo.get("path"):
             st.caption(f"Repo: {repo.get('status')} — {repo.get('path')}")
 
+        # info del parche (por si quieres verlo)
+        patch = e2p.get("patch") or {}
+        if patch.get("status"):
+            st.caption(f"Patch: {patch.get('status')}")
+
         dep = e2p.get("dependency_check") or {}
         if dep.get("packages"):
             st.caption(f"Deps faltantes: {', '.join(dep.get('packages') or [])}")
 
-        # si hay stderr útil, enseñarlo (compacto)
+        if err == "dns_resolution_failed":
+            with st.expander("Diagnóstico rápido (DNS)", expanded=False):
+                ebay_ok = _dns_check("fyp.ebay.com")
+                st.markdown(f"- `fyp.ebay.com`: {'✅ resuelve' if ebay_ok else '❌ NO resuelve'}")
+                google_ok = _dns_check("www.google.com")
+                st.markdown(f"- `www.google.com`: {'✅ resuelve' if google_ok else '❌ NO resuelve'}")
+                st.caption(
+                    "Si Google resuelve pero eBay no, suele ser filtrado/allowlist. "
+                    "Si ninguno resuelve, es DNS global (/etc/resolv.conf, systemd-resolved, proxy corporativo, etc.)."
+                )
+
         stderr = (e2p.get("stderr") or "").strip()
         if stderr:
             with st.expander("stderr Email2PhoneNumber", expanded=False):
                 st.code(stderr, language="text")
         return
 
+    # ---- caso OK / no error ----
     parsed = e2p.get("parsed") or {}
     meta = _email2phone_score(parsed)
 
@@ -172,9 +205,8 @@ def _render_email2phonenumber_operativo(e2p: dict):
         f"— tiempo: `{e2p.get('elapsed', 0)}s`"
     )
 
-    if not e2p.get("success"):
-        st.warning(f"Email2PhoneNumber: ejecución no exitosa (returncode={e2p.get('returncode')})")
-
+    # Si el parche está activo, puede que un proveedor falle pero el script termine OK.
+    # Aun así, si quieres visibilidad, dejamos el "Detalle" con warnings/mensajes.
     signals = meta.get("signals") or []
     if signals:
         for s in signals[:6]:
@@ -200,6 +232,7 @@ def _render_email2phonenumber_operativo(e2p: dict):
         st.json({
             "returncode": e2p.get("returncode"),
             "repo": e2p.get("repo"),
+            "patch": e2p.get("patch"),
             "dependency_check": e2p.get("dependency_check"),
         })
 
@@ -366,7 +399,7 @@ def render_email_block(email_block: dict):
 
         e2p_data = e.get("email2phonenumber")
         if e2p_data:
-            _render_email2phonenumber_operativo(e2p_data)
+            _render_email2phonenumber_operativo(e2p_data, email_value=email_value)
 
         verification_data = e.get("verification")
         if verification_data:

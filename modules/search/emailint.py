@@ -124,21 +124,8 @@ def build_email_source_links(email: str) -> Dict[str, List[Dict[str, Any]]]:
     No ejecuta llamadas activas: solo devuelve URLs de búsqueda
     para que el analista pueda abrirlas desde la UI.
     """
-    domain = email.split("@", 1)[1] if "@" in email else ""
 
     lead_sources = [
-        _build_source_link(
-            email,
-            "Tomba Domain Search",
-            f"https://app.tomba.io/domain-search/{urllib.parse.quote_plus(domain)}" if domain else ""
-        ),
-        _build_source_link(
-            email,
-            "emailfinder",
-            f"https://app.emailfinder.io/search?email={urllib.parse.quote_plus(email)}"
-        ),
-
-        # --- NUEVO: herramienta OSINT (pasiva) ---
         {
             "name": "EmailFinder",
             "source": "emailfinder",
@@ -148,33 +135,15 @@ def build_email_source_links(email: str) -> Dict[str, List[Dict[str, Any]]]:
             "type": "lead_generation",
             "email": email,
         },
-
-        _build_source_link(email, "Email-Crawler-Lead-Generator", ""),
         _build_source_link(
             email,
-            "Email2PhoneNumber",
-            f"https://email2phonenumber.com/search?email={urllib.parse.quote_plus(email)}"
-        ),
-        _build_source_link(
-            email,
-            "emailGuesser",
-            f"https://emailguesser.com/?domain={urllib.parse.quote_plus(domain)}" if domain else ""
+            "EmailFinder (hosted)",
+            f"https://app.emailfinder.io/search?email={urllib.parse.quote_plus(email)}"
         ),
     ]
 
-    info_sources = [
-        _build_source_link(email, "TraceFind.info", f"https://tracefind.info/?q={urllib.parse.quote_plus(email)}"),
-        _build_source_link(email, "SkyMem.info", f"https://skymem.info/srch?q={urllib.parse.quote_plus(email)}"),
-        _build_source_link(email, "Hashtray", f"https://hashtray.com/search?query={urllib.parse.quote_plus(email)}"),
-    ]
-
-    verification_sources = [
-        _build_source_link(
-            email,
-            "gmail_permutator",
-            f"https://github.com/mxrch/gmail_pwner?email={urllib.parse.quote_plus(email)}"
-        ),
-    ]
+    info_sources: List[Dict[str, Any]] = []
+    verification_sources: List[Dict[str, Any]] = []
 
     return {
         "lead_generation": lead_sources,

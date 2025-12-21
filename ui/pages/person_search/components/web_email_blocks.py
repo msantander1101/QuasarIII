@@ -69,7 +69,19 @@ def _render_sources(sources: dict):
         for item in items:
             name = item.get("name", "Fuente")
             url = item.get("url", "#")
-            st.markdown(f"- [{name}]({url})")
+            meta_parts = []
+            if item.get("type"):
+                meta_parts.append(item["type"])
+            if item.get("confidence"):
+                meta_parts.append(f"confianza: {item['confidence']}")
+
+            suffix = f" — {', '.join(meta_parts)}" if meta_parts else ""
+            bullet = f"- [{name}]({url}){suffix}" if url else f"- {name}{suffix}"
+            st.markdown(bullet)
+
+            command = item.get("command")
+            if command:
+                st.code(command, language="bash")
 
 
 def render_email_block(email_block: dict):

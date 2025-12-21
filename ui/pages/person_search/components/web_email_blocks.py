@@ -29,6 +29,29 @@ def _render_ghunt(ghunt: dict):
         st.code(output, language="text")
 
 
+def _render_emailfinder(emailfinder: dict):
+    if not emailfinder:
+        return
+
+    if not emailfinder.get("success"):
+        error_msg = emailfinder.get("error") or emailfinder.get("stderr") or "Ejecución fallida"
+        st.warning(f"EmailFinder: {error_msg}")
+
+        command = emailfinder.get("command")
+        if command:
+            st.code(command, language="bash")
+
+        install = emailfinder.get("install")
+        if install:
+            st.info("Instala EmailFinder la primera vez:")
+            st.code(install, language="bash")
+        return
+
+    output = emailfinder.get("output") or "(sin salida de EmailFinder)"
+    with st.expander("Resultado EmailFinder", expanded=False):
+        st.code(output, language="text")
+
+
 def _render_verification(verification: dict):
     if not verification:
         return
@@ -69,6 +92,7 @@ def _render_sources(sources: dict):
         for item in items:
             name = item.get("name", "Fuente")
             url = item.get("url", "#")
+
             meta_parts = []
             if item.get("type"):
                 meta_parts.append(item["type"])
@@ -118,6 +142,10 @@ def render_email_block(email_block: dict):
         verification_data = e.get("verification")
         if verification_data:
             _render_verification(verification_data)
+
+        emailfinder_data = e.get("emailfinder")
+        if emailfinder_data:
+            _render_emailfinder(emailfinder_data)
 
         source_links = e.get("sources")
         if source_links:

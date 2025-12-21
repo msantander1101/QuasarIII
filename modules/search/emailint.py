@@ -159,13 +159,27 @@ def build_email_source_links(email: str) -> Dict[str, List[Dict[str, Any]]]:
 def emailfinder_lookup(email: str) -> Dict[str, Any]:
     install_hint = "go install github.com/rix4uni/emailfinder@latest"
 
+    # 1) Intentar localizar binario en PATH
     resolved_cli = shutil.which("emailfinder")
-    resolved_script = None
 
-    if os.path.exists("emailfinder.py"):
-        resolved_script = "emailfinder.py"
-    else:
-        resolved_script = shutil.which("emailfinder.py")
+    # 2) Fallbacks típicos en entornos Go
+    if not resolved_cli:
+        home_go_bin = os.path.expanduser("~/go/bin/emailfinder")
+        env_gopath = os.environ.get("GOPATH")
+        env_go_bin = os.path.join(env_gopath, "bin", "emailfinder") if env_gopath else None
+
+        for candidate in (home_go_bin, env_go_bin):
+            if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                resolved_cli = candidate
+                break
+
+    # 3) Fallback a script python (si existe)
+    resolved_script = None
+    script_candidates = ["emailfinder.py", shutil.which("emailfinder.py")]
+    for candidate in script_candidates:
+        if candidate and os.path.exists(candidate):
+            resolved_script = candidate
+            break
 
     if resolved_cli:
         command = [resolved_cli, "-e", email]

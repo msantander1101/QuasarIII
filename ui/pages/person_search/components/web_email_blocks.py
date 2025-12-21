@@ -29,13 +29,61 @@ def _render_ghunt(ghunt: dict):
         st.code(output, language="text")
 
 
-def render_email_block(email_block: dict):
-    if not email_block:
+def _render_verification(verification: dict):
+    if not verification:
         return
 
+    deliverable = verification.get("deliverable", "unknown")
+    reason = verification.get("reason")
+
+    status_label = {
+        True: "Entregable",
+        False: "No entregable",
+        "unknown": "Sin comprobar"
+    }.get(deliverable, "Sin comprobar")
+
+    msg = f"**Estado de entrega**: {status_label}"
+    if reason:
+        msg += f" — Motivo: {reason}"
+
+    st.markdown(msg)
+
+
+def _render_sources(sources: dict):
+    if not sources:
+        return
+
+    st.markdown("**Fuentes OSINT**")
+
+    groups = [
+        ("Generación de leads", sources.get("lead_generation", [])),
+        ("Información de email", sources.get("email_info", [])),
+        ("Verificación", sources.get("verification", [])),
+    ]
+
+    for label, items in groups:
+        if not items:
+            continue
+
+        st.markdown(f"*{label}*")
+        for item in items:
+            name = item.get("name", "Fuente")
+            url = item.get("url", "#")
+            st.markdown(f"- [{name}]({url})")
+
+
+def render_email_block(email_block: dict):
     st.markdown("### 📧 Emails")
 
-    results = email_block.get("results") if isinstance(email_block, dict) else None
+    if not isinstance(email_block, dict):
+        st.info("No hay resultados de email")
+        return
+
+    errors = email_block.get("errors") or []
+    for err in errors:
+        st.warning(f"Email: {err}")
+
+    results = email_block.get("results")
     if not results:
         st.info("No hay resultados de email")
         return
@@ -54,6 +102,14 @@ def render_email_block(email_block: dict):
         ghunt_data = e.get("ghunt")
         if ghunt_data:
             _render_ghunt(ghunt_data)
+
+        verification_data = e.get("verification")
+        if verification_data:
+            _render_verification(verification_data)
+
+        source_links = e.get("sources")
+        if source_links:
+            _render_sources(source_links)
 
         st.markdown("---")
 

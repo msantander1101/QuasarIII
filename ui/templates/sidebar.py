@@ -2,6 +2,7 @@
 
 import streamlit as st
 from core.config_manager import config_manager
+from utils.version import get_app_version_label, get_version_label
 
 
 def render_sidebar():
@@ -30,7 +31,8 @@ def render_sidebar():
             status_color = "green" if provided else "red"
             st.markdown(
                 f"<p style='margin: 5px 0;'>{status_icon} <span style='color: {status_color};'>{key}</span></p>",
-                unsafe_allow_html=True)
+                unsafe_allow_html=True
+            )
 
     # Menú de navegación
     st.markdown("### 📋 Navegación Principal")
@@ -64,5 +66,6 @@ def render_sidebar():
     st.markdown("---")
 
     # Información de versión
-    st.markdown("### 📦 Versión 1.0.0")
+    st.markdown(f"### 📦 Versión {get_app_version_label()}")
+    st.caption(f"GitHub: {get_version_label()}")
     st.caption("OSINT Suite Profesional")

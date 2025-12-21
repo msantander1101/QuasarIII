@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 # ------------------ Helpers ------------------
 
+
 def _normalize_sources(selected: List[str]) -> List[str]:
     if not selected:
         return ["people", "email", "social"]
@@ -30,6 +31,7 @@ def _normalize_sources(selected: List[str]) -> List[str]:
 
 
 # ------------------ MAIN UI ------------------
+
 
 def show_person_search_ui():
     st.markdown("""
@@ -74,6 +76,7 @@ def show_person_search_ui():
                     res = search_multiple_sources(
                         query=query,
                         selected_sources=_normalize_sources(sources),
+                        email=email or "",
                         username=username or None
                     )
 
@@ -123,6 +126,8 @@ def show_person_search_ui():
     # ========== EMAIL ==========
     if "email" in results:
         render_email_block(results["email"])
+    elif st.session_state.get("ps_email"):
+        st.info("Búsqueda de email no ejecutada o sin datos para mostrar.")
 
     # ========== WEB ==========
     if "web" in results:

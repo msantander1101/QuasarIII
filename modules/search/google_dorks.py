@@ -13,6 +13,7 @@ from typing import Any, List, Dict, Optional, Iterable
 from urllib.parse import quote_plus
 import re
 from functools import lru_cache
+from bs4 import BeautifulSoup
 
 
 def _search_serpapi(dork_q: str, limit: int, serpapi_key: str) -> List[Dict[str, Any]]:
@@ -81,6 +82,7 @@ def _search_google_cse(dork_q: str, limit: int, google_api_key: str, google_cx: 
 
 def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, Any]]:
     """Búsqueda usando DuckDuckGo."""
+    # Intento 1: API JSON (RelatedTopics)
     try:
         api_url = (
             f"https://api.duckduckgo.com/?q={quote_plus(dork_q)}"
@@ -108,9 +110,52 @@ def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, Any]]:
 
             if 'RelatedTopics' in data:
                 extracted = extract_topics(data['RelatedTopics'])
-                return extracted[:limit]
+                if extracted:
+                    return extracted[:limit]
     except Exception:
         pass
+
+    # Intento 2: HTML scraping (modo sin clave)
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; QuasarIII/1.0)",
+            "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+        }
+        html_resp = requests.get(
+            "https://duckduckgo.com/html/", params={"q": dork_q}, headers=headers, timeout=15
+        )
+
+        if html_resp.status_code == 200:
+            soup = BeautifulSoup(html_resp.text, "html.parser")
+            results = []
+
+            for res in soup.select("div.result"):
+                link_el = res.select_one("a.result__a")
+                if not link_el:
+                    continue
+
+                title = link_el.get_text(strip=True) or "Sin título"
+                url = link_el.get("href") or "#"
+                snippet_el = res.select_one("a.result__snippet") or res.select_one("div.result__snippet")
+                snippet = snippet_el.get_text(" ", strip=True) if snippet_el else ""
+
+                results.append({
+                    "title": title,
+                    "url": url,
+                    "snippet": snippet,
+                    "source": "DuckDuckGo",
+                    "confidence": 0.70,
+                    "timestamp": time.time(),
+                })
+
+                if len(results) >= limit:
+                    break
+
+            if results:
+                return results
+    except Exception:
+        pass
+
     return []
 
 

@@ -26,7 +26,11 @@ def _render_subresults(subresults: List[Dict[str, Any]]):
             meta_bits.append(f"conf: {confidence}")
         meta = f" ({', '.join(meta_bits)})" if meta_bits else ""
 
-        st.markdown(f"- [{title}]({url}){meta}\n    \n    {snippet}")
+        st.markdown(
+            f"- **[{title}]({url})**{meta}\n"
+            f"  \n  <small>{snippet}</small>",
+            unsafe_allow_html=True,
+        )
 
 
 def render_dorks_block(dorks_block: Dict[str, Any]):
@@ -42,6 +46,11 @@ def render_dorks_block(dorks_block: Dict[str, Any]):
     results = dorks_block.get("results") or []
     active_hits = [r for r in results if isinstance(r, dict) and r.get("results")]
     empty_hits = [r for r in results if isinstance(r, dict) and not r.get("results")]
+
+    total_links = sum(len(r.get("results") or []) for r in active_hits)
+    st.caption(
+        f"{len(active_hits)} dorks con hallazgos • {total_links} enlaces extraídos • {len(empty_hits)} sin hits directos"
+    )
 
     if not results:
         st.info("No hay resultados de dorks")

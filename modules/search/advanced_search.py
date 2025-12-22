@@ -256,7 +256,11 @@ class AdvancedSearcher:
     # ------------------------------------------------------------
     # GOOGLE DORKS
     # ------------------------------------------------------------
-    def _search_dorks(self, query: str) -> Dict[str, Any]:
+    def _search_dorks(
+        self,
+        query: str,
+        extra_queries: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         out = {
             "source": "dorks",
             "query": query,
@@ -267,9 +271,22 @@ class AdvancedSearcher:
 
         try:
             if google_dorks and hasattr(google_dorks, "search_google_dorks"):
-                res = google_dorks.search_google_dorks(query)
-                out["results"] = res
-                out["has_data"] = bool(res)
+                queries: List[str] = [query]
+
+                for candidate in extra_queries or []:
+                    if candidate and candidate not in queries:
+                        queries.append(candidate)
+
+                aggregated: List[Dict[str, Any]] = []
+
+                for q in queries:
+                    q_results = google_dorks.search_google_dorks(q)
+
+                    if isinstance(q_results, list):
+                        aggregated.extend(q_results)
+
+                out["results"] = aggregated
+                out["has_data"] = bool(aggregated)
 
         except Exception as e:
             logger.exception("Dorks search failed")
@@ -318,7 +335,12 @@ class AdvancedSearcher:
                 searched.append("social")
 
             if "dorks" in sources:
-                results["dorks"] = self._search_dorks(query)
+                extra_dorks: List[str] = []
+
+                if email and "@" in email and email != query:
+                    extra_dorks.append(email)
+
+                results["dorks"] = self._search_dorks(query, extra_queries=extra_dorks)
                 searched.append("dorks")
 
         except Exception as e:

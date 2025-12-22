@@ -9,13 +9,13 @@ o DuckDuckGo para obtener resultados reales.
 import time
 import os
 import requests
-from typing import List, Dict, Optional, Iterable
+from typing import Any, List, Dict, Optional, Iterable
 from urllib.parse import quote_plus
 import re
 from functools import lru_cache
 
 
-def _search_serpapi(dork_q: str, limit: int, serpapi_key: str) -> List[Dict[str, any]]:
+def _search_serpapi(dork_q: str, limit: int, serpapi_key: str) -> List[Dict[str, Any]]:
     """Búsqueda usando SerpAPI."""
     if not serpapi_key:
         return []
@@ -47,7 +47,7 @@ def _search_serpapi(dork_q: str, limit: int, serpapi_key: str) -> List[Dict[str,
     return []
 
 
-def _search_google_cse(dork_q: str, limit: int, google_api_key: str, google_cx: str) -> List[Dict[str, any]]:
+def _search_google_cse(dork_q: str, limit: int, google_api_key: str, google_cx: str) -> List[Dict[str, Any]]:
     """Búsqueda usando Google Custom Search."""
     if not (google_api_key and google_cx):
         return []
@@ -79,7 +79,7 @@ def _search_google_cse(dork_q: str, limit: int, google_api_key: str, google_cx: 
     return []
 
 
-def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, any]]:
+def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, Any]]:
     """Búsqueda usando DuckDuckGo."""
     try:
         api_url = (
@@ -253,7 +253,7 @@ def search_google_dorks(query: str,
                         google_api_key: Optional[str] = None,
                         google_cx: Optional[str] = None,
                         max_patterns: Optional[int] = None,
-                        include_profiled: bool = True) -> List[Dict[str, any]]:
+                        include_profiled: bool = True) -> List[Dict[str, Any]]:
     """
     Busca utilizando dorks en buscadores.
 
@@ -294,7 +294,7 @@ def search_google_dorks(query: str,
         max_patterns=max_patterns,
     )
 
-    results: List[Dict[str, any]] = []
+    results: List[Dict[str, Any]] = []
     for entry in dork_entries:
         dork_query = entry["query"]
         pattern = entry["pattern"]
@@ -319,6 +319,7 @@ def search_google_dorks(query: str,
             "pattern": pattern,
             "title": f"Google Dork: {pattern}",
             "url": google_url,
+            "google_url": google_url,
             "description": f"Resultados de dork '{pattern}' para '{query}'",
             "timestamp": time.time(),
             "confidence": 0.80 if subresults else 0.50,

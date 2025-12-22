@@ -1,19 +1,9 @@
 import streamlit as st
 
 
-def _render_hibp(hibp: dict):
-    if not hibp:
-        st.info("No se pudieron cargar datos de HIBP")
-        return
-
-    if hibp.get("error"):
-        st.warning(f"HIBP: {hibp.get('error')}")
-        return
-
-    breached = hibp.get("breached")
-    breach_count = hibp.get("breach_count", 0)
-    st.markdown(f"**Breaches**: {'Sí' if breached else 'No'} | **Total**: {breach_count}")
-
+# --------------------------------------------------
+# GHUNT
+# --------------------------------------------------
 
 def _render_ghunt(ghunt: dict):
     if not ghunt:
@@ -28,258 +18,83 @@ def _render_ghunt(ghunt: dict):
         st.warning(f"GHunt: {ghunt.get('error', 'ejecución no exitosa')}")
         return
 
-    warnings = ghunt.get("warnings") or []
-    for w in warnings:
-        st.warning(w)
-
     output = ghunt.get("output") or "(sin salida capturada)"
+    warnings = ghunt.get("warnings") or []
+    if warnings:
+        for w in warnings:
+            st.warning(w)
+
     with st.expander("Ver salida GHunt cruda", expanded=False):
         st.code(output, language="text")
 
 
 # --------------------------------------------------
-# EMAIL2PHONENUMBER — RENDER OPERATIVO
+# HASHTRAY — RENDER
 # --------------------------------------------------
 
-def _email2phone_score(parsed: dict) -> dict:
-    lp = (parsed or {}).get("lastpass") or {}
-    eb = (parsed or {}).get("ebay") or {}
-    pp = (parsed or {}).get("paypal") or {}
+def _render_hashtray(hashtray: dict):
+    if not hashtray:
+        st.info("Hashtray sin datos")
+        return
 
-    sources_hit = 0
-    signals: list[str] = []
-    points = 0
+    st.markdown("**Hashtray (Gravatar pivot)**")
 
-    # LastPass
-    lp_hit = False
-    if lp.get("reported") is True and lp.get("last_digits"):
-        lp_hit = True
-        points += 25
-        signals.append(f"LastPass: últimos 2 dígitos {lp.get('last_digits')}")
-    if lp.get("length_without_cc") is not None:
-        lp_hit = True
-        points += 15
-        signals.append(f"LastPass: longitud sin CC {lp.get('length_without_cc')}")
-    if lp.get("non_us"):
-        points += 5
-        signals.append("LastPass: no US")
-    if lp_hit:
-        sources_hit += 1
+    # error duro del wrapper
+    if hashtray.get("error"):
+        st.warning(f"Hashtray: {hashtray.get('error')}")
 
-    # eBay
-    eb_hit = False
-    if eb.get("reported") is True and eb.get("first_digit"):
-        eb_hit = True
-        points += 15
-        signals.append(f"eBay: primer dígito {eb.get('first_digit')}")
-    if eb.get("reported") is True and eb.get("last_digits"):
-        eb_hit = True
-        points += 20
-        signals.append(f"eBay: últimos 2 dígitos {eb.get('last_digits')}")
-    if eb_hit:
-        sources_hit += 1
+        install = hashtray.get("install") or {}
+        cmd = install.get("command")
+        if cmd:
+            st.caption("Instalación automática (si aplica):")
+            st.code(cmd, language="bash")
 
-    # PayPal
-    pp_hit = False
-    if pp.get("reported") is True and pp.get("first_digit"):
-        pp_hit = True
-        points += 15
-        signals.append(f"PayPal: primer dígito {pp.get('first_digit')}")
-    if pp.get("reported") is True and pp.get("last_digits"):
-        pp_hit = True
-        cnt = pp.get("last_digits_count")
-        bonus = 10 if (isinstance(cnt, int) and cnt >= 3) else 0
-        points += 25 + bonus
-        suffix = f" (x{cnt})" if cnt else ""
-        signals.append(f"PayPal: últimos dígitos {pp.get('last_digits')}{suffix}")
-    if pp.get("length_without_cc") is not None:
-        pp_hit = True
-        points += 10
-        signals.append(f"PayPal: longitud sin CC {pp.get('length_without_cc')}")
-    if pp_hit:
-        sources_hit += 1
+        inst_err = (install.get("stderr") or "").strip()
+        if inst_err:
+            with st.expander("stderr instalación hashtray", expanded=False):
+                st.code(inst_err, language="text")
+        return
 
-    # Bonus multi-fuente
-    if sources_hit >= 2:
-        points += 15
-    if sources_hit >= 3:
-        points += 10
+    ok = bool(hashtray.get("success"))
+    found = hashtray.get("found")
+    elapsed = hashtray.get("elapsed", 0)
+    rc = hashtray.get("returncode")
 
-    score = max(0, min(100, points))
-
-    if score >= 70:
-        level = "Alta"
-        light = "🟢"
-    elif score >= 35:
-        level = "Media"
-        light = "🟠"
+    if ok and found is False:
+        st.info(f"🟦 Gravatar no encontrado (404) — `{elapsed}s`")
     else:
-        level = "Baja"
-        light = "🔴"
-
-    return {
-        "score": score,
-        "level": level,
-        "light": light,
-        "sources_hit": sources_hit,
-        "signals": signals,
-    }
-
-
-def _render_email2phonenumber_operativo(e2p: dict, email_value: str = ""):
-    # guard anti-duplicado (por email)
-    guard_key = f"e2p_rendered::{email_value or e2p.get('email','')}"
-    if st.session_state.get(guard_key):
-        return
-    st.session_state[guard_key] = True
-
-    if not e2p:
-        st.info("Email2PhoneNumber sin datos")
-        return
-
-    st.markdown("**Email2PhoneNumber (indicadores de teléfono)**")
-
-    def _dns_check(host: str) -> bool:
-        try:
-            import socket
-            socket.getaddrinfo(host, 443)
-            return True
-        except Exception:
-            return False
-
-    # errores duros
-    if e2p.get("error"):
-        err = e2p.get("error")
-        human = {
-            "dns_resolution_failed": "Fallo DNS (no se puede resolver el host del proveedor). Revisa DNS/Proxy/egress.",
-            "network_connection_error": "Fallo de conectividad (sin salida a Internet / proxy requerido).",
-            "timeout": "Timeout del scraping (posible bloqueo o red lenta).",
-            "execution_failed": "Ejecución fallida (revisar stderr).",
-            "invalid_email": "Email inválido.",
-            "patch_broken": "El script quedó con un parche roto (IndentationError). Se ha intentado reparar automáticamente.",
-        }.get(err, str(err))
-
-        st.error(f"🔴 {human}")
-
-        repo = e2p.get("repo") or {}
-        if repo.get("status") or repo.get("path"):
-            st.caption(f"Repo: {repo.get('status')} — {repo.get('path')}")
-
-        patch = e2p.get("patch") or {}
-        if patch.get("status"):
-            st.caption(f"Patch: {patch.get('status')}")
-
-        dep = e2p.get("dependency_check") or {}
-        if dep.get("packages"):
-            st.caption(f"Deps faltantes: {', '.join(dep.get('packages') or [])}")
-
-        if err == "dns_resolution_failed":
-            with st.expander("Diagnóstico rápido (DNS)", expanded=False):
-                ebay_ok = _dns_check("fyp.ebay.com")
-                st.markdown(f"- `fyp.ebay.com`: {'✅ resuelve' if ebay_ok else '❌ NO resuelve'}")
-                google_ok = _dns_check("www.google.com")
-                st.markdown(f"- `www.google.com`: {'✅ resuelve' if google_ok else '❌ NO resuelve'}")
-                st.caption(
-                    "Si Google resuelve pero eBay no, suele ser filtrado/allowlist. "
-                    "Si ninguno resuelve, es DNS global (/etc/resolv.conf, systemd-resolved, proxy corporativo, etc.)."
-                )
-
-        stderr = (e2p.get("stderr") or "").strip()
-        if stderr:
-            with st.expander("stderr Email2PhoneNumber", expanded=False):
-                st.code(stderr, language="text")
-        return
-
-    # ---- caso OK / no error ----
-    parsed = e2p.get("parsed") or {}
-    meta = _email2phone_score(parsed)
-
-    st.markdown(
-        f"{meta['light']} **Confianza: {meta['level']}** "
-        f"(**{meta['score']}/100**, fuentes con señales: **{meta['sources_hit']}**) "
-        f"— tiempo: `{e2p.get('elapsed', 0)}s`"
-    )
-
-    signals = meta.get("signals") or []
-    if signals:
-        for s in signals[:6]:
-            st.markdown(f"- {s}")
-        if len(signals) > 6:
-            st.caption(f"+{len(signals) - 6} señales adicionales (ver detalle)")
-    else:
-        st.info("Sin señales útiles (ningún servicio devolvió dígitos/longitud).")
-
-    with st.expander("Detalle Email2PhoneNumber", expanded=False):
-        msgs = (parsed.get("messages") or [])
-        if msgs:
-            st.code("\n".join(msgs), language="text")
-        else:
-            st.code(e2p.get("stdout") or "(sin stdout)", language="text")
-
-        stderr = (e2p.get("stderr") or "").strip()
-        if stderr:
-            st.markdown("**stderr**")
-            st.code(stderr, language="text")
-
-        st.markdown("**Debug**")
-        st.json({
-            "returncode": e2p.get("returncode"),
-            "repo": e2p.get("repo"),
-            "patch": e2p.get("patch"),
-            "dependency_check": e2p.get("dependency_check"),
-        })
-
-
-# --------------------------------------------------
-# EMAILFINDER
-# --------------------------------------------------
-
-def _render_emailfinder(emailfinder: dict):
-    if not emailfinder:
-        return
-
-    if not emailfinder.get("success"):
-        error_msg = emailfinder.get("error") or emailfinder.get("stderr") or "Ejecución fallida"
-        st.warning(f"EmailFinder: {error_msg}")
-
-        command = emailfinder.get("command")
-        if command:
-            st.code(command, language="bash")
-
-        install = emailfinder.get("install")
-        if install:
-            st.info("Instala EmailFinder la primera vez:")
-            st.code(install, language="bash")
-        return
-
-    stats = emailfinder.get("stats") or {}
-    emails = emailfinder.get("emails") or []
-
-    if emails:
         st.markdown(
-            f"**EmailFinder (dominio: `{emailfinder.get('domain', '')}`)** — "
-            f"Encontrados: **{stats.get('emails_found', len(emails))}** | "
-            f"Exactos: **{stats.get('exact_matches', 0)}** | "
-            f"Mismo dominio: **{stats.get('same_domain', 0)}**"
+            f"{'🟢' if ok else '🔴'} "
+            f"Estado: **{'OK' if ok else 'Ejecución fallida'}**"
+            f"{f' (rc={rc})' if rc is not None else ''} — "
+            f"tiempo: `{elapsed}s`"
         )
 
-        candidates = emailfinder.get("candidates") or []
-        with st.expander("Emails deduplicados (con coincidencias)", expanded=False):
-            for c in candidates:
-                mail = c.get("email", "")
-                tag = "✅ exacto" if c.get("exact_match") else ("🟦 mismo dominio" if c.get("same_domain") else "")
-                st.markdown(f"- `{mail}`" + (f" — {tag}" if tag else ""))
-    else:
-        st.info("EmailFinder: no devolvió emails parseables (revisa salida cruda).")
+    cmd = hashtray.get("command")
+    if cmd:
+        st.caption("Comando ejecutado:")
+        st.code(cmd, language="bash")
 
-    output = emailfinder.get("output") or "(sin salida de EmailFinder)"
-    stderr = emailfinder.get("stderr") or ""
-    with st.expander("Salida cruda EmailFinder", expanded=False):
-        st.code(output, language="text")
-        if stderr.strip():
-            st.markdown("**stderr**")
+    stdout = (hashtray.get("stdout") or "").strip()
+    stderr = (hashtray.get("stderr") or "").strip()
+
+    if stdout:
+        with st.expander("Salida hashtray", expanded=found is True):
+            st.code(stdout, language="text")
+
+    if stderr:
+        with st.expander("stderr hashtray", expanded=False):
             st.code(stderr, language="text")
 
+    attempts = hashtray.get("attempts") or []
+    if attempts:
+        with st.expander("Debug hashtray", expanded=False):
+            st.json(attempts)
+
+
+# --------------------------------------------------
+# VERIFICACIÓN
+# --------------------------------------------------
 
 def _render_verification(verification: dict):
     if not verification:
@@ -291,7 +106,7 @@ def _render_verification(verification: dict):
     status_label = {
         True: "Entregable",
         False: "No entregable",
-        "unknown": "Sin comprobar"
+        "unknown": "Sin comprobar",
     }.get(deliverable, "Sin comprobar")
 
     msg = f"**Estado de entrega**: {status_label}"
@@ -301,6 +116,10 @@ def _render_verification(verification: dict):
     st.markdown(msg)
 
 
+# --------------------------------------------------
+# FUENTES OSINT
+# --------------------------------------------------
+
 def _render_sources(sources: dict):
     if not sources:
         return
@@ -308,7 +127,6 @@ def _render_sources(sources: dict):
     st.markdown("**Fuentes OSINT**")
 
     groups = [
-        ("Generación de leads", sources.get("lead_generation", [])),
         ("Información de email", sources.get("email_info", [])),
         ("Verificación", sources.get("verification", [])),
     ]
@@ -322,42 +140,23 @@ def _render_sources(sources: dict):
             name = item.get("name", "Fuente")
             url = item.get("url", "#")
 
-            meta_parts = []
+            meta = []
             if item.get("type"):
-                meta_parts.append(item["type"])
+                meta.append(item["type"])
             if item.get("confidence"):
-                meta_parts.append(f"confianza: {item['confidence']}")
+                meta.append(f"confianza: {item['confidence']}")
 
-            suffix = f" — {', '.join(meta_parts)}" if meta_parts else ""
-            bullet = f"- [{name}]({url}){suffix}" if url else f"- {name}{suffix}"
-            st.markdown(bullet)
+            suffix = f" — {', '.join(meta)}" if meta else ""
+            st.markdown(f"- [{name}]({url}){suffix}")
 
             command = item.get("command")
             if command:
                 st.code(command, language="bash")
 
 
-def _render_emailfinder_enriched(enriched: list):
-    if not enriched:
-        return
-
-    with st.expander("Cruce HIBP/GHunt de candidatos (EmailFinder)", expanded=False):
-        for item in enriched:
-            if not isinstance(item, dict):
-                continue
-            email_value = item.get("email", "N/A")
-            st.markdown(f"#### {email_value}")
-
-            hibp_data = item.get("hibp")
-            if hibp_data:
-                _render_hibp(hibp_data)
-
-            ghunt_data = item.get("ghunt")
-            if ghunt_data:
-                _render_ghunt(ghunt_data)
-
-            st.markdown("---")
-
+# --------------------------------------------------
+# MAIN EMAIL BLOCK
+# --------------------------------------------------
 
 def render_email_block(email_block: dict):
     st.markdown("### 📧 Emails")
@@ -366,8 +165,7 @@ def render_email_block(email_block: dict):
         st.info("No hay resultados de email")
         return
 
-    errors = email_block.get("errors") or []
-    for err in errors:
+    for err in email_block.get("errors") or []:
         st.warning(f"Email: {err}")
 
     results = email_block.get("results")
@@ -382,35 +180,28 @@ def render_email_block(email_block: dict):
         email_value = e.get("email", "N/A")
         st.markdown(f"#### {email_value}")
 
-        hibp_data = e.get("hibp")
-        if hibp_data:
-            _render_hibp(hibp_data)
-
         ghunt_data = e.get("ghunt")
         if ghunt_data:
             _render_ghunt(ghunt_data)
 
-        e2p_data = e.get("email2phonenumber")
-        if e2p_data:
-            _render_email2phonenumber_operativo(e2p_data, email_value=email_value)
+        hashtray_data = e.get("hashtray")
+        if hashtray_data:
+            _render_hashtray(hashtray_data)
 
         verification_data = e.get("verification")
         if verification_data:
             _render_verification(verification_data)
 
-        emailfinder_data = e.get("emailfinder")
-        if emailfinder_data:
-            _render_emailfinder(emailfinder_data)
-
-        enriched = e.get("emailfinder_enriched") or []
-        _render_emailfinder_enriched(enriched)
-
-        source_links = e.get("sources")
-        if source_links:
-            _render_sources(source_links)
+        sources = e.get("sources")
+        if sources:
+            _render_sources(sources)
 
         st.markdown("---")
 
+
+# --------------------------------------------------
+# WEB BLOCK
+# --------------------------------------------------
 
 def render_web_block(web_block: dict):
     if not web_block:

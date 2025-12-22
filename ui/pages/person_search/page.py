@@ -16,6 +16,7 @@ from .components.person_card import render_person_card
 from .components.socmint_block import render_socmint_block
 from .components.web_email_blocks import render_web_block, render_email_block
 from .components.darkweb_block import render_darkweb_block
+from .components.dorks_block import render_dorks_block
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,10 @@ def show_person_search_ui():
     # ========== DARKWEB ==========
     if "darkweb" in results and results["darkweb"].get("results"):
         render_darkweb_block(results["darkweb"])
+
+    # ========== DORKS ==========
+    if "dorks" in results:
+        render_dorks_block(results["dorks"])
 
     # ------------------ METADATA ------------------
     meta = results.get("_metadata", {})

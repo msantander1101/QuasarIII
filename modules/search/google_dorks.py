@@ -9,7 +9,7 @@ o DuckDuckGo para obtener resultados reales.
 import time
 import os
 import requests
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Iterable
 from urllib.parse import quote_plus
 import re
 from functools import lru_cache
@@ -182,12 +182,78 @@ DEFAULT_DORKS = [
 ]
 
 
+def _deduplicate_preserve_order(items: Iterable[str]) -> List[str]:
+    """Elimina duplicados preservando el orden de los elementos."""
+
+    seen = set()
+    unique_items = []
+
+    for item in items:
+        if item not in seen:
+            unique_items.append(item)
+            seen.add(item)
+
+    return unique_items
+
+
+def build_dork_queries(query: str,
+                       patterns: Optional[List[str]] = None,
+                       include_profiled: bool = True,
+                       max_patterns: Optional[int] = None) -> List[Dict[str, str]]:
+    """Normaliza y genera dorks listos para ejecutarse.
+
+    Combina los patrones proporcionados con dorks sugeridos automáticamente
+    según el tipo de consulta. Los dorks finales se devuelven ya formateados
+    con la query original, listos para ser usados en buscadores.
+    """
+
+    seed_patterns: List[str] = []
+
+    if patterns:
+        seed_patterns.extend(patterns)
+
+    if include_profiled and not patterns:
+        # Solo añadimos los dorks perfilados cuando el usuario no ha
+        # pasado patrones explícitos. Esto evita mezclar formatos
+        # personalizados con los automáticos.
+        seed_patterns.extend(generate_profiled_dorks(query))
+
+    if not seed_patterns:
+        seed_patterns.extend(DEFAULT_DORKS)
+
+    normalized_patterns = _deduplicate_preserve_order(
+        [p.strip() for p in seed_patterns if p]
+    )
+
+    output: List[Dict[str, str]] = []
+
+    for pattern in normalized_patterns:
+        formatted_query = pattern.format(query) if "{}" in pattern else pattern
+        formatted_query = formatted_query.strip()
+
+        if not formatted_query:
+            continue
+
+        output.append({
+            "pattern": pattern,
+            "query": formatted_query,
+            "google_url": f"https://www.google.com/search?q={quote_plus(formatted_query)}",
+        })
+
+        if max_patterns and len(output) >= max_patterns:
+            break
+
+    return output
+
+
 def search_google_dorks(query: str,
                         patterns: Optional[List[str]] = None,
                         max_results: int = 10,
                         serpapi_key: Optional[str] = None,
                         google_api_key: Optional[str] = None,
-                        google_cx: Optional[str] = None) -> List[Dict[str, any]]:
+                        google_cx: Optional[str] = None,
+                        max_patterns: Optional[int] = None,
+                        include_profiled: bool = True) -> List[Dict[str, any]]:
     """
     Busca utilizando dorks en buscadores.
 
@@ -198,6 +264,9 @@ def search_google_dorks(query: str,
         serpapi_key (str, optional): Clave SerpAPI
         google_api_key (str, optional): Clave Google Custom Search
         google_cx (str, optional): CX Google Custom Search
+        max_patterns (int, optional): Número máximo de dorks a generar
+        include_profiled (bool): Si True, añade dorks sugeridos según el tipo
+            de dato (usuario, email, dominio, etc.)
 
     Returns:
         List[Dict]: Resultados de búsqueda
@@ -210,10 +279,7 @@ def search_google_dorks(query: str,
     google_api_key = google_api_key or os.getenv('GOOGLE_API_KEY')
     google_cx = google_cx or os.getenv('GOOGLE_CUSTOM_SEARCH_CX')
 
-    patterns = patterns or DEFAULT_DORKS
-
     # Determinar qué motor de búsqueda usar
-    search_method = None
     if serpapi_key:
         search_method = lambda q, lim: _search_serpapi(q, lim, serpapi_key)
     elif google_api_key and google_cx:
@@ -221,36 +287,26 @@ def search_google_dorks(query: str,
     else:
         search_method = _search_duckduckgo
 
+    dork_entries = build_dork_queries(
+        query,
+        patterns=patterns,
+        include_profiled=include_profiled,
+        max_patterns=max_patterns,
+    )
+
     results: List[Dict[str, any]] = []
-    for pattern in patterns:
-        # Usar intext: siempre que sea posible
-        if "{}" in pattern:
-            dork_query = pattern.format(query)
-        else:
-            dork_query = pattern
+    for entry in dork_entries:
+        dork_query = entry["query"]
+        pattern = entry["pattern"]
+        google_url = entry["google_url"]
 
-        # Asegurarnos de que sea un dork de texto exacto si es una palabra o frase simple
-        if "intext:" not in pattern and not pattern.startswith('"'):
-            # Convertir patrones simples o específicos en intext:
-            if "site:" in pattern:
-                # Para patrones con sitio, no convertimos para mantener exactitud de dominio
-                pass
-            elif "filetype:" in pattern or "inurl:" in pattern:
-                # Mantener patrones técnicos intactos
-                pass
-            elif query.strip() and not ('"' in pattern and "intext:" in pattern):
-                # Para patrones simples, agregar intext:
-                if not "intext:" in dork_query:
-                    # Convertir a intext solo si no es una estructura compleja
-                    parts = dork_query.split()
-                    if len(parts) > 1:  # Es una frase
-                        # Solo convertir si el patrón no incluye intext o es de estilo "site:..."
-                        dork_query = f'intext:"{query}" {dork_query}'
-                    else:
-                        # Es una sola palabra, ponerla en intext: al principio
-                        dork_query = f'intext:"{query}" {dork_query}'
+        # Refuerzo de intext para patrones muy simples
+        if "intext:" not in dork_query and query.strip():
+            if not any(token in dork_query for token in ["site:", "filetype:", "inurl:"]):
+                quoted = f'"{query}"' if " " in query else query
+                dork_query = f"intext:{quoted} {dork_query}".strip()
+                google_url = f"https://www.google.com/search?q={quote_plus(dork_query)}"
 
-        google_url = f"https://www.google.com/search?q={quote_plus(dork_query)}"
         subresults = search_method(dork_query, min(3, max_results))
 
         # Asegurar que subresults es una lista
@@ -260,11 +316,12 @@ def search_google_dorks(query: str,
         results.append({
             "source": "google_dorks",
             "query": dork_query,
+            "pattern": pattern,
             "title": f"Google Dork: {pattern}",
             "url": google_url,
             "description": f"Resultados de dork '{pattern}' para '{query}'",
             "timestamp": time.time(),
-            "confidence": 0.80,
+            "confidence": 0.80 if subresults else 0.50,
             "results": subresults,
         })
 

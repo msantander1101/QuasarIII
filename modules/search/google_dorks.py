@@ -6,6 +6,7 @@ Genera dorks y consulta SerpAPI, Google CSE o DuckDuckGo (best-effort).
 ✅ Filtrado por site: para evitar falsos positivos.
 ✅ Fallback inteligente con variantes para aumentar hallazgos.
 ✅ Devuelve metadata útil para UI (engine, has_key, counts, hint...).
+✅ Logging útil (engine, queries, hits, hints, errores SERP).
 """
 
 import time
@@ -77,12 +78,20 @@ def _search_serpapi_raw(dork_q: str, limit: int, serpapi_key: str) -> Tuple[List
             "api_key": serpapi_key,
             "num": limit,
         }
+
+        t0 = time.time()
         resp = requests.get(url, params=params, timeout=30)
+        dt = round(time.time() - t0, 3)
+
+        logger.debug("[dorks:serpapi] http=%s time=%ss q=%s", resp.status_code, dt, dork_q)
+
         if resp.status_code != 200:
             return [], f"serpapi_http_{resp.status_code}"
 
         data = resp.json() if resp.text else {}
         err = data.get("error")
+        if err:
+            logger.debug("[dorks:serpapi] api_error=%s", err)
 
         hits = [
             {
@@ -96,10 +105,12 @@ def _search_serpapi_raw(dork_q: str, limit: int, serpapi_key: str) -> Tuple[List
             }
             for item in data.get("organic_results", [])[:limit]
         ]
+
+        logger.debug("[dorks:serpapi] hits=%s", len(hits))
         return hits, err
 
     except Exception as e:
-        logger.debug("SerpAPI exception: %s", e)
+        logger.exception("[dorks:serpapi] exception")
         return [], "serpapi_exception"
 
 
@@ -110,11 +121,17 @@ def _search_google_cse(dork_q: str, limit: int, google_api_key: str, google_cx: 
     try:
         url = "https://www.googleapis.com/customsearch/v1"
         params = {"key": google_api_key, "cx": google_cx, "q": dork_q, "num": min(limit, 10)}
+
+        t0 = time.time()
         resp = requests.get(url, params=params, timeout=20)
+        dt = round(time.time() - t0, 3)
+
+        logger.debug("[dorks:cse] http=%s time=%ss q=%s", resp.status_code, dt, dork_q)
 
         if resp.status_code == 200:
             data = resp.json()
-            return [
+            items = data.get("items", [])[:limit]
+            hits = [
                 {
                     "title": item.get("title"),
                     "url": item.get("link"),
@@ -124,10 +141,19 @@ def _search_google_cse(dork_q: str, limit: int, google_api_key: str, google_cx: 
                     "confidence": 0.85,
                     "timestamp": time.time(),
                 }
-                for item in data.get("items", [])[:limit]
+                for item in items
             ]
-    except Exception as e:
-        logger.debug("Google CSE exception: %s", e)
+            logger.debug("[dorks:cse] hits=%s", len(hits))
+            return hits
+
+        # si falla, intenta loguear cuerpo corto
+        try:
+            logger.debug("[dorks:cse] body=%s", (resp.text or "")[:200])
+        except Exception:
+            pass
+
+    except Exception:
+        logger.exception("[dorks:cse] exception")
 
     return []
 
@@ -158,7 +184,12 @@ def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, Any]]:
             f"https://api.duckduckgo.com/?q={quote_plus(dork_q)}"
             "&format=json&no_redirect=1&skip_disambig=1"
         )
+        t0 = time.time()
         response = requests.get(api_url, timeout=10)
+        dt = round(time.time() - t0, 3)
+
+        logger.debug("[dorks:ddg_api] http=%s time=%ss q=%s", response.status_code, dt, dork_q)
+
         if response.status_code == 200:
             data = response.json()
 
@@ -192,12 +223,17 @@ def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, Any]]:
 
     # 2) lite (mejor para scraping básico)
     try:
+        t0 = time.time()
         html_resp = requests.get(
             "https://lite.duckduckgo.com/lite/",
             params={"q": dork_q},
             headers=headers,
             timeout=15,
         )
+        dt = round(time.time() - t0, 3)
+
+        logger.debug("[dorks:ddg_lite] http=%s time=%ss q=%s", html_resp.status_code, dt, dork_q)
+
         if html_resp.status_code == 200 and html_resp.text:
             soup = BeautifulSoup(html_resp.text, "html.parser")
             results: List[Dict[str, Any]] = []
@@ -355,12 +391,19 @@ def search_google_dorks(
         engine = "ddg"
         engine_has_key = False
 
+    logger.info(
+        "[dorks] engine=%s has_key=%s user_id=%s max_patterns=%s max_results=%s dorks_file=%s",
+        engine, engine_has_key, user_id, max_patterns, max_results, dorks_file
+    )
+
     # load patterns if file provided
     if dorks_file:
         loaded = _load_patterns_from_file(dorks_file)
         if loaded.get("patterns"):
             patterns = loaded["patterns"]
             include_profiled = False
+            logger.info("[dorks] patterns loaded from file | count=%s | include_profiled=%s",
+                        len(patterns), include_profiled)
 
     dork_entries = build_dork_queries(
         query,
@@ -370,6 +413,7 @@ def search_google_dorks(
     )
 
     per_dork_limit = min(5, max_results)
+    logger.debug("[dorks] entries=%s per_dork_limit=%s", len(dork_entries), per_dork_limit)
 
     def _run_search(dq: str, limit: int) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """(hits, error_msg)"""
@@ -384,10 +428,13 @@ def search_google_dorks(
     # Para fallbacks “email pastebin”
     email_local = query.split("@")[0] if "@" in query else ""
 
+    t_all = time.time()
+
     for entry in dork_entries:
         dork_query = entry["query"]
         pattern = entry["pattern"]
-        google_url = entry["google_url"]
+
+        logger.debug("[dorks] run pattern=%s | q=%s", pattern, dork_query)
 
         # ✅ Variantes + filtrado por site:
         variants = [dork_query]
@@ -399,6 +446,7 @@ def search_google_dorks(
                 f'site:pastebin.com intext:"{email_local}"',
                 f'"{email_local}" pastebin',
             ]
+            logger.debug("[dorks] variants=%s", variants)
 
         subresults: List[Dict[str, Any]] = []
         used_query = dork_query
@@ -408,11 +456,17 @@ def search_google_dorks(
             tmp, err = _run_search(vq, per_dork_limit)
             last_error = err or last_error
 
+            if err:
+                logger.debug("[dorks] engine_error=%s q=%s", err, vq)
+
             if not isinstance(tmp, list):
                 tmp = []
 
-            # 🔒 Filtrar por site: si aplica (evita falsos positivos)
+            before = len(tmp)
             tmp = _filter_by_site_operator(vq, tmp)
+            after = len(tmp)
+            if before != after:
+                logger.debug("[dorks] site-filter reduced hits %s -> %s for q=%s", before, after, vq)
 
             if tmp:
                 subresults = tmp
@@ -425,11 +479,12 @@ def search_google_dorks(
         # Hint para UI
         no_results_hint = None
         if not subresults:
-            # si el motor tiene key pero no devuelve nada, y/o filtramos todo por site:
             no_results_hint = "no_serp_hits_or_filtered"
-            # si serpapi devolvió explícitamente mensaje de "no results"
             if isinstance(last_error, str) and "hasn't returned any results" in last_error.lower():
                 no_results_hint = "serpapi_no_results"
+
+        logger.info("[dorks] done | pattern=%s | hits=%s | used_query=%s | hint=%s",
+                    pattern, len(subresults), dork_query, no_results_hint)
 
         results.append({
             "source": "google_dorks",
@@ -449,6 +504,9 @@ def search_google_dorks(
             "results": subresults,
             "no_results_hint": no_results_hint,
         })
+
+    logger.info("[dorks] finished | total_entries=%s | total_time=%ss",
+                len(results), round(time.time() - t_all, 3))
 
     return results
 

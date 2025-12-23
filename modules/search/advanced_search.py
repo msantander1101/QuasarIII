@@ -3,10 +3,13 @@
 Advanced Search Coordinator — versión endurecida y estable.
 Todos los módulos (people, email, SOCMINT, domains, web, dorks)
 devuelven estructuras coherentes para UI/Streamlit.
+✅ Logging con trace_id por búsqueda.
+✅ Logs por fuente con has_data + counts.
 """
 
 import time
 import logging
+import uuid
 from typing import Dict, Any, List, Optional
 
 from modules.search.socmint.profile_unifier import unify_profile
@@ -141,7 +144,11 @@ class AdvancedSearcher:
                 f"?q={urllib.parse.quote_plus(query)}"
                 "&format=json&no_redirect=1"
             )
+            t0 = time.time()
             r = requests.get(api, timeout=10)
+            dt = round(time.time() - t0, 3)
+
+            logger.debug("[web] ddg_api http=%s time=%ss q=%s", r.status_code, dt, query)
 
             if r.status_code == 200:
                 data = r.json()
@@ -180,6 +187,7 @@ class AdvancedSearcher:
         user_id: int = 1,
         max_results: int = 10,
         max_patterns: Optional[int] = None,
+        trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         out = {
             "source": "dorks",
@@ -197,6 +205,9 @@ class AdvancedSearcher:
                     if candidate and candidate not in queries:
                         queries.append(candidate)
 
+                logger.info("[trace=%s] dorks start | queries=%s | file=%s | max_results=%s | max_patterns=%s",
+                            trace_id, len(queries), dorks_file, max_results, max_patterns)
+
                 aggregated: List[Dict[str, Any]] = []
                 for q in queries:
                     q_results = google_dorks.search_google_dorks(
@@ -211,6 +222,18 @@ class AdvancedSearcher:
 
                 out["results"] = aggregated
                 out["has_data"] = bool(aggregated)
+
+                # resumen engines/hits
+                engines = {}
+                total_hits = 0
+                for e in aggregated:
+                    if isinstance(e, dict):
+                        eng = e.get("engine") or "unknown"
+                        engines[eng] = engines.get(eng, 0) + 1
+                        total_hits += int(e.get("subresults_count") or 0)
+
+                logger.info("[trace=%s] dorks done | entries=%s | total_hits=%s | engines=%s",
+                            trace_id, len(aggregated), total_hits, engines)
 
         except Exception as e:
             logger.exception("Dorks search failed")
@@ -229,36 +252,69 @@ class AdvancedSearcher:
         dorks_max_results: int = 10,
         dorks_max_patterns: Optional[int] = None,
     ):
+        trace_id = str(uuid.uuid4())[:8]
         start = time.time()
         results: Dict[str, Any] = {}
         searched: List[str] = []
 
+        logger.info("[trace=%s] search start | query=%s | sources=%s | user_id=%s", trace_id, query, sources, user_id)
+
         try:
             if "people" in sources:
+                t0 = time.time()
                 results["people"] = self._search_people(query)
                 searched.append("people")
+                logger.info("[trace=%s] people done | has_data=%s n=%s time=%ss",
+                            trace_id,
+                            results["people"].get("has_data"),
+                            len(results["people"].get("results") or []),
+                            round(time.time() - t0, 3))
 
             if "email" in sources:
+                t0 = time.time()
                 results["email"] = self._search_email(query, email=email, user_id=user_id)
                 searched.append("email")
+                logger.info("[trace=%s] email done | has_data=%s time=%ss",
+                            trace_id,
+                            results["email"].get("has_data"),
+                            round(time.time() - t0, 3))
 
             if "domain" in sources:
+                t0 = time.time()
                 results["domain"] = self._search_domain(query)
                 searched.append("domain")
+                logger.info("[trace=%s] domain done | has_data=%s time=%ss",
+                            trace_id,
+                            results["domain"].get("has_data"),
+                            round(time.time() - t0, 3))
 
             if "web" in sources:
+                t0 = time.time()
                 results["web"] = self._search_web(query)
                 searched.append("web")
+                logger.info("[trace=%s] web done | has_data=%s n=%s time=%ss",
+                            trace_id,
+                            results["web"].get("has_data"),
+                            len(results["web"].get("results") or []),
+                            round(time.time() - t0, 3))
 
             if "social" in sources:
+                t0 = time.time()
                 results["social"] = self._search_social(query, username=username)
                 searched.append("social")
+                n_social = len(results["social"].get("results") or {}) if isinstance(results["social"].get("results"), dict) else 0
+                logger.info("[trace=%s] social done | has_data=%s n=%s time=%ss",
+                            trace_id,
+                            results["social"].get("has_data"),
+                            n_social,
+                            round(time.time() - t0, 3))
 
             if "dorks" in sources:
                 extra_dorks: List[str] = []
                 if email and "@" in email and email != query:
                     extra_dorks.append(email)
 
+                t0 = time.time()
                 results["dorks"] = self._search_dorks(
                     query,
                     extra_queries=extra_dorks,
@@ -266,18 +322,28 @@ class AdvancedSearcher:
                     user_id=user_id,
                     max_results=dorks_max_results,
                     max_patterns=dorks_max_patterns,
+                    trace_id=trace_id,
                 )
                 searched.append("dorks")
+                logger.info("[trace=%s] dorks wrapper done | has_data=%s entries=%s time=%ss",
+                            trace_id,
+                            results["dorks"].get("has_data"),
+                            len(results["dorks"].get("results") or []),
+                            round(time.time() - t0, 3))
 
         except Exception as e:
-            logger.error("CRITICAL error in multi-source search", exc_info=True)
+            logger.error("[trace=%s] CRITICAL error in multi-source search", trace_id, exc_info=True)
             results["fatal_error"] = str(e)
 
         results["_metadata"] = {
             "query": query,
             "search_time": round(time.time() - start, 3),
             "sources_searched": searched,
+            "trace_id": trace_id,
         }
+
+        logger.info("[trace=%s] search end | time=%ss | searched=%s",
+                    trace_id, results["_metadata"]["search_time"], searched)
 
         return results
 
@@ -319,8 +385,12 @@ def search_multiple_sources(
         )
         if unified_profile and unified_profile.get("confidence_score", 0) > 0:
             results["unified_profile"] = unified_profile
+            logger.info("[trace=%s] unify_profiles ok | score=%s",
+                        results.get("_metadata", {}).get("trace_id"),
+                        unified_profile.get("confidence_score"))
     except Exception as e:
-        logger.warning(f"Profile unification failed: {e}")
+        logger.warning("[trace=%s] Profile unification failed: %s",
+                       results.get("_metadata", {}).get("trace_id"), e)
 
     return results
 

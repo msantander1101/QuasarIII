@@ -3,6 +3,8 @@ import streamlit.web.cli as stcli
 import sys
 from core.db_manager import create_db
 from utils.logger import setup_logger
+from utils.logger import bootstrap_root_logger
+bootstrap_root_logger()
 
 # Configurar logger
 logger = setup_logger()

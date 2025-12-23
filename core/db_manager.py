@@ -3,7 +3,6 @@ import os
 import logging
 
 # Configurar logger
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def create_db(db_path: str = 'data/users.db'):
@@ -12,7 +11,7 @@ def create_db(db_path: str = 'data/users.db'):
     """
     # Asegurarse de que el directorio 'data' existe
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    print(f"Intentando conectar a DB: {db_path}")
+    logger.info("Intentando conectar a DB: %s", db_path)
 
     try:
         conn = sqlite3.connect(db_path)

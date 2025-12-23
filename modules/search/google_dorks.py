@@ -15,6 +15,9 @@ import re
 from functools import lru_cache
 from bs4 import BeautifulSoup
 
+# ✅ NUEVO: loader externo
+from utils.dorks_loader import load_dorks_txt, load_dorks_json, guess_loader
+
 
 def _search_serpapi(dork_q: str, limit: int, serpapi_key: str) -> List[Dict[str, Any]]:
     """Búsqueda usando SerpAPI."""
@@ -161,12 +164,8 @@ def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, Any]]:
 
 # -------------------------------------------------------------------------
 # 🔥 DORKS PROFESIONALES POR DEFECTO (OSINT + HUELLA DIGITAL)
-# USANDO intext: PARA BUSCAR TEXTOS EXACTOS
 # -------------------------------------------------------------------------
 DEFAULT_DORKS = [
-    # ------------------------------
-    # 🔎 Perfiles & Huella Digital
-    # ------------------------------
     'intext:"{}" site:linkedin.com/in',
     'intext:"{}" site:instagram.com',
     'intext:"{}" site:twitter.com',
@@ -174,52 +173,28 @@ DEFAULT_DORKS = [
     'intext:"{}" site:keybase.io',
     'intext:"powered by discourse" intext:"view user"',
     'intext:"index of /users"',
-
-    # ------------------------------
-    # 🔐 Leaks y credenciales
-    # ------------------------------
     'intext:"{}" site:pastebin.com',
     'intext:"{}" site:ghostbin.com',
     'intext:"{}" site:dpaste.org',
     'intext:"password" intext:"lastpass" filetype:txt',
     'intext:"password" intext:"admin" filetype:xls',
     'intext:"credentials exposed"',
-
-    # -----------------------------------
-    # 🧬 Repositorios (Github/GitLab leaks)
-    # -----------------------------------
     'intext:"{}" site:github.com "API_KEY"',
     'intext:"{}" site:github.com "SECRET_KEY"',
     'intext:"{}" site:gitlab.com "token"',
     'intext:"filename:.env" intext:"DB_PASSWORD"',
-
-    # -----------------------------------
-    # 📄 Documentos sensibles
-    # -----------------------------------
     'intext:"{}" filetype:pdf',
     'intext:"{}" filetype:xls',
     'intext:"{}" filetype:txt "confidential"',
     'intext:"index of" intext:"backup"',
     'intext:"index of" intext:"logs"',
-
-    # -----------------------------------
-    # 🔍 WordPress OSINT
-    # -----------------------------------
     'intext:"{}" inurl:wp-config.php',
     'intext:"{}" inurl:wp-admin "index of"',
     'intext:"{}" site:*/wp-content/uploads',
     'intext:"{}" intitle:"WordPress Users"',
-
-    # -----------------------------------
-    # ☁️ Cloud Buckets Públicos
-    # -----------------------------------
     'intext:"{}" site:amazonaws.com "index of"',
     'intext:"{}" site:storage.googleapis.com "index of"',
     'intext:"{}" "index of" "azure"',
-
-    # -----------------------------------
-    # 🛰️ Infraestructura expuesta
-    # -----------------------------------
     'intext:"Server at" intext:"port" intext:"Apache"',
     'intext:"Dashboard" intext:"login" intext:"admin"',
     'intext:"camera" intext:"inurl:view.shtml"',
@@ -229,38 +204,52 @@ DEFAULT_DORKS = [
 
 def _deduplicate_preserve_order(items: Iterable[str]) -> List[str]:
     """Elimina duplicados preservando el orden de los elementos."""
-
     seen = set()
     unique_items = []
-
     for item in items:
         if item not in seen:
             unique_items.append(item)
             seen.add(item)
-
     return unique_items
+
+
+# ✅ NUEVO: carga opcional desde fichero (txt o json)
+def _load_patterns_from_file(dorks_file: str) -> Dict[str, Any]:
+    """
+    Devuelve:
+      {
+        "patterns": List[str] | None,
+        "profiled_map": Dict[str, List[str]] | None
+      }
+    - TXT: patterns = lista completa; profiled_map = None
+    - JSON: patterns = data.get("default"); profiled_map = data sin "default"
+    """
+    mode = guess_loader(dorks_file)
+
+    if mode == "json":
+        data = load_dorks_json(dorks_file)
+        if not data:
+            return {"patterns": None, "profiled_map": None}
+        default = data.get("default") or []
+        profiled = {k: v for k, v in data.items() if k != "default"}
+        return {"patterns": default or None, "profiled_map": profiled or None}
+
+    # txt
+    patterns = load_dorks_txt(dorks_file)
+    return {"patterns": patterns or None, "profiled_map": None}
 
 
 def build_dork_queries(query: str,
                        patterns: Optional[List[str]] = None,
                        include_profiled: bool = True,
                        max_patterns: Optional[int] = None) -> List[Dict[str, str]]:
-    """Normaliza y genera dorks listos para ejecutarse.
-
-    Combina los patrones proporcionados con dorks sugeridos automáticamente
-    según el tipo de consulta. Los dorks finales se devuelven ya formateados
-    con la query original, listos para ser usados en buscadores.
-    """
-
+    """Normaliza y genera dorks listos para ejecutarse."""
     seed_patterns: List[str] = []
 
     if patterns:
         seed_patterns.extend(patterns)
 
     if include_profiled and not patterns:
-        # Solo añadimos los dorks perfilados cuando el usuario no ha
-        # pasado patrones explícitos. Esto evita mezclar formatos
-        # personalizados con los automáticos.
         seed_patterns.extend(generate_profiled_dorks(query))
 
     if not seed_patterns:
@@ -273,9 +262,14 @@ def build_dork_queries(query: str,
     output: List[Dict[str, str]] = []
 
     for pattern in normalized_patterns:
-        formatted_query = pattern.format(query) if "{}" in pattern else pattern
-        formatted_query = formatted_query.strip()
+        # ✅ FIX: antes solo formateabas si "{}" in pattern
+        # Ahora formateamos si hay llaves, y si falla no rompemos.
+        try:
+            formatted_query = pattern.format(query) if ("{" in pattern and "}" in pattern) else pattern
+        except Exception:
+            formatted_query = pattern
 
+        formatted_query = formatted_query.strip()
         if not formatted_query:
             continue
 
@@ -298,23 +292,10 @@ def search_google_dorks(query: str,
                         google_api_key: Optional[str] = None,
                         google_cx: Optional[str] = None,
                         max_patterns: Optional[int] = None,
-                        include_profiled: bool = True) -> List[Dict[str, Any]]:
+                        include_profiled: bool = True,
+                        dorks_file: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Busca utilizando dorks en buscadores.
-
-    Args:
-        query (str): Consulta principal
-        patterns (List[str], optional): Patrones a usar (por defecto DEFAULT_DORKS)
-        max_results (int): Máximo número de resultados
-        serpapi_key (str, optional): Clave SerpAPI
-        google_api_key (str, optional): Clave Google Custom Search
-        google_cx (str, optional): CX Google Custom Search
-        max_patterns (int, optional): Número máximo de dorks a generar
-        include_profiled (bool): Si True, añade dorks sugeridos según el tipo
-            de dato (usuario, email, dominio, etc.)
-
-    Returns:
-        List[Dict]: Resultados de búsqueda
     """
     if not query:
         return []
@@ -324,6 +305,22 @@ def search_google_dorks(query: str,
     google_api_key = google_api_key or os.getenv('GOOGLE_API_KEY')
     google_cx = google_cx or os.getenv('GOOGLE_CUSTOM_SEARCH_CX')
 
+    # ✅ NUEVO: fichero de dorks por env o parámetro
+    dorks_file = dorks_file or os.getenv("QUASAR_DORKS_FILE")
+
+    # ✅ NUEVO: soporte txt/json
+    profiled_map: Optional[Dict[str, List[str]]] = None
+    if dorks_file:
+        loaded = _load_patterns_from_file(dorks_file)
+        # Si TXT: patterns = lista completa
+        # Si JSON: patterns = "default"
+        if loaded.get("patterns"):
+            patterns = loaded["patterns"]
+            # Si el usuario te pasa lista explícita, suele ser mejor NO mezclar perfilado
+            include_profiled = False
+        if loaded.get("profiled_map"):
+            profiled_map = loaded["profiled_map"]
+
     # Determinar qué motor de búsqueda usar
     if serpapi_key:
         search_method = lambda q, lim: _search_serpapi(q, lim, serpapi_key)
@@ -332,6 +329,7 @@ def search_google_dorks(query: str,
     else:
         search_method = _search_duckduckgo
 
+    # ✅ Si cargaste JSON con dorks por tipo, puedes usarlo en el perfilador
     dork_entries = build_dork_queries(
         query,
         patterns=patterns,
@@ -354,7 +352,6 @@ def search_google_dorks(query: str,
 
         subresults = search_method(dork_query, min(3, max_results))
 
-        # Asegurar que subresults es una lista
         if not isinstance(subresults, list):
             subresults = []
 
@@ -381,41 +378,26 @@ def search_google_dorks(query: str,
 @lru_cache(maxsize=1024)
 def classify_query_type(query: str) -> str:
     """Detecta automáticamente qué tipo de dato se está investigando."""
-
     query = query.strip()
 
     if re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", query):
         return "email"
-
     if re.match(r"^\d{7,15}$", query.replace("+", "").replace(" ", "")):
         return "phone"
-
     if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", query):
         return "ip"
-
     if re.match(r"^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$", query):
         return "subnet"
-
     if re.match(r"^[a-zA-Z0-9\-_]{3,32}$", query):
         return "username"
-
     if "." in query and not query.startswith("http"):
         return "domain"
-
     if query.startswith("http://") or query.startswith("https://"):
         return "url"
-
-    # Si no encaja en nada → persona genérica
     return "person"
 
 
-# ========================================================================
-# DORKS PROFESIONALES SEGÚN TIPO DE OBJETIVO
-# ========================================================================
 _DORKS_BY_TYPE = {
-    # ---------------------------------------------------
-    # PERSONA (nombre real)
-    # ---------------------------------------------------
     "person": [
         'intext:"{}" site:linkedin.com/in',
         'intext:"{}" site:facebook.com',
@@ -424,10 +406,6 @@ _DORKS_BY_TYPE = {
         'intext:"{}" "phone number"',
         'intext:"{}" "email"'
     ],
-
-    # ---------------------------------------------------
-    # USERNAME (alias)
-    # ---------------------------------------------------
     "username": [
         'intext:"{}" site:github.com',
         'intext:"{}" site:gitlab.com',
@@ -436,10 +414,6 @@ _DORKS_BY_TYPE = {
         'intext:"{}" site:steamcommunity.com',
         'intext:"{}" "username" "profile"'
     ],
-
-    # ---------------------------------------------------
-    # EMAIL
-    # ---------------------------------------------------
     "email": [
         'intext:"{}" site:pastebin.com',
         'intext:"{}" site:ghostbin.com',
@@ -448,10 +422,6 @@ _DORKS_BY_TYPE = {
         'intext:"{}" "leaked"',
         'intext:"{}" "credential"'
     ],
-
-    # ---------------------------------------------------
-    # TELÉFONO
-    # ---------------------------------------------------
     "phone": [
         'intext:"{}" "WhatsApp"',
         'intext:"{}" "Telegram"',
@@ -459,10 +429,6 @@ _DORKS_BY_TYPE = {
         'intext:"{}" "lookup"',
         'intext:"{}" "reverse phone"'
     ],
-
-    # ---------------------------------------------------
-    # DOMINIO / EMPRESA
-    # ---------------------------------------------------
     "domain": [
         'site:{}/wp-admin',
         'site:{}/wp-content',
@@ -471,10 +437,6 @@ _DORKS_BY_TYPE = {
         'site:pastebin.com "{}"',
         'site:github.com "{}"',
     ],
-
-    # ---------------------------------------------------
-    # IP
-    # ---------------------------------------------------
     "ip": [
         'intext:"{}" "port"',
         'intext:"{}" "open"',
@@ -482,19 +444,11 @@ _DORKS_BY_TYPE = {
         'intext:"{}" "vulnerable"',
         'intext:"{}" "camera"',
     ],
-
-    # ---------------------------------------------------
-    # SUBRED
-    # ---------------------------------------------------
     "subnet": [
         'intext:"{}" "IP range"',
         'intext:"{}" "open services"',
         'intext:"{}" "network"'
     ],
-
-    # ---------------------------------------------------
-    # URL
-    # ---------------------------------------------------
     "url": [
         'intext:"{}" "index of"',
         'intext:"{}" "backup"',
@@ -509,25 +463,22 @@ def get_dorks_for_type(query_type: str) -> List[str]:
     return _DORKS_BY_TYPE.get(query_type, [])
 
 
-# ============================================================================
-# FUSIÓN AUTOMÁTICA CON EL MÓDULO EXISTENTE
-# ============================================================================
 def generate_profiled_dorks(query: str, user_patterns: Optional[List[str]] = None) -> List[str]:
     """
     Genera dorks automáticamente basados en el tipo de consulta.
-
-    Si el usuario pasa patrones: se usan directamente.
-    Si NO pasa patrones: se generan automáticamente en base al tipo de dato.
     """
     if user_patterns:
-        # Usar patrones del usuario tal cual, aplicando el formato
-        return [pattern.format(query) if "{}" in pattern else pattern for pattern in user_patterns]
+        return [pattern.format(query) if ("{" in pattern and "}" in pattern) else pattern for pattern in user_patterns]
 
     qtype = classify_query_type(query)
     base_dorks = get_dorks_for_type(qtype)
 
-    # Expande {}
-    expanded = [d.format(query) for d in base_dorks]
+    expanded: List[str] = []
+    for d in base_dorks:
+        try:
+            expanded.append(d.format(query) if ("{" in d and "}" in d) else d)
+        except Exception:
+            expanded.append(d)
 
     return expanded
 

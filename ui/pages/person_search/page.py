@@ -5,7 +5,8 @@ Versión final limpia, profesional y controlada.
 
 import time
 import logging
-from typing import List
+import os
+from typing import List, Optional
 
 import streamlit as st
 
@@ -62,6 +63,19 @@ def show_person_search_ui():
         default=["people", "email", "social"]
     )
 
+    # ✅ NUEVO: Opciones avanzadas (dorks file)
+    with st.expander("⚙️ Opciones avanzadas", expanded=False):
+        default_dorks_file = os.getenv("QUASAR_DORKS_FILE", "")
+        dorks_file: str = st.text_input(
+            "📄 Archivo de dorks (opcional) — .txt o .json",
+            value=default_dorks_file,
+            key="ps_dorks_file",
+            help="Si se indica, los dorks se cargarán desde este fichero en lugar de los hardcodeados."
+        )
+
+        # Normalizar: si está vacío, no se pasa
+        dorks_file = dorks_file.strip()
+
     # ------------------ ACTIONS ------------------
     cta1, cta2 = st.columns(2)
 
@@ -78,7 +92,9 @@ def show_person_search_ui():
                         query=query,
                         selected_sources=_normalize_sources(sources),
                         email=email or "",
-                        username=username or None
+                        username=username or None,
+                        # ✅ NUEVO
+                        dorks_file=dorks_file or None,
                     )
 
                 st.session_state["ps_results"] = res

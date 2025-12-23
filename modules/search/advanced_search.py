@@ -260,6 +260,7 @@ class AdvancedSearcher:
         self,
         query: str,
         extra_queries: Optional[List[str]] = None,
+        dorks_file: Optional[str] = None,  # ✅ NUEVO
     ) -> Dict[str, Any]:
         out = {
             "source": "dorks",
@@ -267,6 +268,8 @@ class AdvancedSearcher:
             "results": [],
             "errors": [],
             "has_data": False,
+            # ✅ NUEVO: para UI/debug
+            "dorks_file": dorks_file,
         }
 
         try:
@@ -280,7 +283,11 @@ class AdvancedSearcher:
                 aggregated: List[Dict[str, Any]] = []
 
                 for q in queries:
-                    q_results = google_dorks.search_google_dorks(q)
+                    # ✅ NUEVO: pasar dorks_file
+                    q_results = google_dorks.search_google_dorks(
+                        q,
+                        dorks_file=dorks_file,
+                    )
 
                     if isinstance(q_results, list):
                         aggregated.extend(q_results)
@@ -304,6 +311,7 @@ class AdvancedSearcher:
         email: str = "",
         username: Optional[str] = None,
         user_id: int = 1,
+        dorks_file: Optional[str] = None,  # ✅ NUEVO
     ):
         start = time.time()
         results: Dict[str, Any] = {}
@@ -340,7 +348,11 @@ class AdvancedSearcher:
                 if email and "@" in email and email != query:
                     extra_dorks.append(email)
 
-                results["dorks"] = self._search_dorks(query, extra_queries=extra_dorks)
+                results["dorks"] = self._search_dorks(
+                    query,
+                    extra_queries=extra_dorks,
+                    dorks_file=dorks_file,  # ✅ NUEVO
+                )
                 searched.append("dorks")
 
         except Exception as e:
@@ -389,6 +401,7 @@ def search_multiple_sources(
     email: str = "",
     username: Optional[str] = None,
     user_id: int = 1,
+    dorks_file: Optional[str] = None,  # ✅ NUEVO
 ):
     selected_sources = selected_sources or []
 
@@ -398,6 +411,7 @@ def search_multiple_sources(
         email=email or (query if "@" in query else ""),
         username=username,
         user_id=user_id,
+        dorks_file=dorks_file,  # ✅ NUEVO
     )
 
     try:

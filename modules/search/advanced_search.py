@@ -171,13 +171,15 @@ class AdvancedSearcher:
 
         return out
 
-    # ✅ DORKS con soporte user_id + dorks_file
+    # ✅ DORKS con soporte user_id + dorks_file + límites
     def _search_dorks(
         self,
         query: str,
         extra_queries: Optional[List[str]] = None,
         dorks_file: Optional[str] = None,
         user_id: int = 1,
+        max_results: int = 10,
+        max_patterns: Optional[int] = None,
     ) -> Dict[str, Any]:
         out = {
             "source": "dorks",
@@ -199,8 +201,10 @@ class AdvancedSearcher:
                 for q in queries:
                     q_results = google_dorks.search_google_dorks(
                         q,
-                        user_id=user_id,          # ✅ NUEVO
-                        dorks_file=dorks_file,    # ✅ NUEVO
+                        user_id=user_id,
+                        dorks_file=dorks_file,
+                        max_results=max_results,
+                        max_patterns=max_patterns,
                     )
                     if isinstance(q_results, list):
                         aggregated.extend(q_results)
@@ -222,6 +226,8 @@ class AdvancedSearcher:
         username: Optional[str] = None,
         user_id: int = 1,
         dorks_file: Optional[str] = None,
+        dorks_max_results: int = 10,
+        dorks_max_patterns: Optional[int] = None,
     ):
         start = time.time()
         results: Dict[str, Any] = {}
@@ -257,7 +263,9 @@ class AdvancedSearcher:
                     query,
                     extra_queries=extra_dorks,
                     dorks_file=dorks_file,
-                    user_id=user_id,   # ✅ NUEVO
+                    user_id=user_id,
+                    max_results=dorks_max_results,
+                    max_patterns=dorks_max_patterns,
                 )
                 searched.append("dorks")
 
@@ -287,7 +295,9 @@ def search_multiple_sources(
     email: str = "",
     username: Optional[str] = None,
     user_id: int = 1,
-    dorks_file: Optional[str] = None,  # ✅ NUEVO
+    dorks_file: Optional[str] = None,
+    dorks_max_results: int = 10,
+    dorks_max_patterns: Optional[int] = None,
 ):
     selected_sources = selected_sources or []
 
@@ -297,7 +307,9 @@ def search_multiple_sources(
         email=email or (query if "@" in query else ""),
         username=username,
         user_id=user_id,
-        dorks_file=dorks_file,  # ✅ NUEVO
+        dorks_file=dorks_file,
+        dorks_max_results=dorks_max_results,
+        dorks_max_patterns=dorks_max_patterns,
     )
 
     try:

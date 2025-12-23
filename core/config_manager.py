@@ -4,6 +4,7 @@ from core.db_manager import save_user_config, get_user_config, delete_user_confi
 
 logger = logging.getLogger(__name__)
 
+
 class ConfigManager:
     """
     Gestiona la configuración personalizada del usuario como claves API.
@@ -11,26 +12,39 @@ class ConfigManager:
     """
 
     def __init__(self):
+        # ✅ Lista de claves que tu app considera "requeridas".
+        # Nota: puedes marcar como requeridas solo las que realmente sean obligatorias.
         self.required_configs = [
             "hibp",  # Para verificar breach de emails
-            "openai_api_key", # Para uso de IA
-            "google_api_key", # Para búsqueda web avanzada
+            "openai_api_key",  # Para uso de IA
+
+            # Web / Dorks
+            "google_api_key",               # Google Custom Search API Key
+            "google_custom_search_cx",      # ✅ NUEVO: CX para Google CSE
+            "serpapi_api_key",              # ✅ NUEVO: SerpAPI Key (opcional pero recomendable)
+
+            # Social
             "instagram_api_key",
             "tiktok_api_key",
             "youtube_api_key",
             "twitter_api_key",
             "linkedin_api_key",
             "facebook_api_key",
-            "reddit_api_key"
+            "reddit_api_key",
         ]
-        # Puedes añadir más configuraciones requeridas aquí
 
-    def save_config(self, user_id: int, config_key: str, config_value: str, encrypt_if_sensitive: bool = False) -> bool:
+    def save_config(
+        self,
+        user_id: int,
+        config_key: str,
+        config_value: str,
+        encrypt_if_sensitive: bool = False
+    ) -> bool:
         """
         Guarda una clave de configuración.
         :param user_id: ID del usuario
-        :param config_key: Clave de configuración (ej: 'hibp_api_key')
-        :param config_value: Valor de la clave (ej: '12345abcde_secret_key')
+        :param config_key: Clave (ej: 'google_api_key')
+        :param config_value: Valor
         :param encrypt_if_sensitive: Si es verdadero, codifica antes de guardar (simulación)
         :return: Booleano indicando si tuvo éxito.
         """
@@ -49,7 +63,7 @@ class ConfigManager:
         Obtiene valor de configuración almacenada.
         :param user_id: ID del usuario
         :param config_key: Clave a buscar
-        :return: El valor (string) o None si no existe.
+        :return: El valor (string) o "" si no existe.
         """
         value = get_user_config(user_id, config_key)
         return value or ""
@@ -86,11 +100,44 @@ class ConfigManager:
         """
         Devuelve la lista de claves necesarias (requeridas por la app).
         """
-        return self.required_configs.copy()  # Devuelve una copia para evitar modificaciones externas
+        return self.required_configs.copy()
+
+    # ---------------------------------------------------------------------
+    # ✅ Helpers específicos (calidad de vida / evita strings mágicos)
+    # ---------------------------------------------------------------------
+
+    def get_google_cse_key(self, user_id: int) -> str:
+        """Devuelve la API Key de Google CSE (google_api_key)."""
+        return self.get_config(user_id, "google_api_key")
+
+    def get_google_cse_cx(self, user_id: int) -> str:
+        """Devuelve el CX de Google Custom Search."""
+        return self.get_config(user_id, "google_custom_search_cx")
+
+    def get_serpapi_key(self, user_id: int) -> str:
+        """Devuelve la key de SerpAPI."""
+        return self.get_config(user_id, "serpapi_api_key")
 
     def get_social_api_key(self, user_id: int, platform: str) -> str:
-        """Obtiene clave API para SOCMINT de plataforma específica"""
+        """
+        Obtiene clave API para SOCMINT de plataforma específica.
+
+        Compatibilidad:
+        - primero intenta "<platform>_api_key" (ej: instagram_api_key)
+        - luego intenta "socmint_<platform>" (formato anterior/alternativo)
+        """
+        platform = (platform or "").strip().lower()
+        if not platform:
+            return ""
+
+        # Preferencia: formato actual en required_configs
+        v = self.get_config(user_id, f"{platform}_api_key")
+        if v:
+            return v
+
+        # Compatibilidad: formato alternativo
         return self.get_config(user_id, f"socmint_{platform}")
 
-# Exporta una instancia única por conveniencia (como en core/auth_manager.py)
+
+# Exporta una instancia única por conveniencia
 config_manager = ConfigManager()

@@ -46,65 +46,31 @@ except Exception:
     google_dorks = None
 
 
-# ================================================================
-#     CLASE PRINCIPAL: AdvancedSearcher
-# ================================================================
-
 class AdvancedSearcher:
 
     def __init__(self, timeout: int = 20):
         self.timeout = timeout
 
-    # ------------------------------------------------------------
-    # PEOPLE SEARCH
-    # ------------------------------------------------------------
     def _search_people(self, query: str) -> Dict[str, Any]:
-        out = {
-            "source": "people",
-            "query": query,
-            "results": [],
-            "errors": [],
-            "has_data": False,
-        }
-
+        out = {"source": "people", "query": query, "results": [], "errors": [], "has_data": False}
         try:
             if not people_search or not hasattr(people_search, "search_people_by_name"):
                 out["errors"].append("people_search module missing")
                 return out
 
             res = people_search.search_people_by_name(query)
-
             if isinstance(res, list):
                 out["results"] = res
                 out["has_data"] = len(res) > 0
-
         except Exception as e:
             logger.exception("People search failed")
             out["errors"].append(str(e))
-
         return out
 
-    # ------------------------------------------------------------
-    # EMAIL SEARCH
-    # ------------------------------------------------------------
-    def _search_email(
-        self,
-        query: str,
-        email: str = "",
-        user_id: int = 1
-    ) -> Dict[str, Any]:
-
-        out = {
-            "source": "email",
-            "query": query,
-            "results": [],
-            "errors": [],
-            "has_data": False,
-        }
-
+    def _search_email(self, query: str, email: str = "", user_id: int = 1) -> Dict[str, Any]:
+        out = {"source": "email", "query": query, "results": [], "errors": [], "has_data": False}
         try:
             email_to_use = email or query
-
             if not email_to_use or "@" not in email_to_use:
                 return out
 
@@ -113,82 +79,45 @@ class AdvancedSearcher:
                 return out
 
             info = emailint.search_email_info(email_to_use, user_id=user_id)
-
-            # Siempre envolvemos en lista
             out["results"] = [info]
             out["has_data"] = True
-
         except Exception as e:
             logger.exception("Email search failed")
             out["errors"].append(str(e))
-
         return out
 
-    # ------------------------------------------------------------
-    # SOCIAL (SOCMINT: Maigret + Sherlock)
-    # ------------------------------------------------------------
     def _search_social(self, query: str, username: Optional[str] = None):
-        out = {
-            "source": "social",
-            "query": query,
-            "results": {},
-            "errors": [],
-            "has_data": False,
-        }
-
+        out = {"source": "social", "query": query, "results": {}, "errors": [], "has_data": False}
         username_to_use = username or (query if "@" not in query else None)
         if not username_to_use:
             return out
 
         from modules.search.socmint.socmint import search_social_profiles
         raw = search_social_profiles(username_to_use)
-
         profiles = raw.get("social_profiles", {})
 
-        # 🔥 SOLO marcar has_data si hay perfiles reales
-        valid_profiles = {
-            k: v for k, v in profiles.items()
-            if isinstance(v, dict) and not v.get("error")
-        }
-
+        valid_profiles = {k: v for k, v in profiles.items() if isinstance(v, dict) and not v.get("error")}
         if valid_profiles:
             out["results"] = valid_profiles
             out["has_data"] = True
         else:
-            out["results"] = profiles  # solo errores
+            out["results"] = profiles
             out["has_data"] = False
 
         out["errors"].extend(raw.get("errors", []))
         return out
 
-    # ------------------------------------------------------------
-    # DOMAIN / ARCHIVE
-    # ------------------------------------------------------------
     def _search_domain(self, query: str) -> Dict[str, Any]:
-        out = {
-            "source": "domain",
-            "query": query,
-            "results": {},
-            "errors": [],
-            "has_data": False,
-        }
-
+        out = {"source": "domain", "query": query, "results": {}, "errors": [], "has_data": False}
         try:
-            # WHOIS + DNS
             if domainint and hasattr(domainint, "whois_lookup"):
                 whois = domainint.whois_lookup(query)
                 dns = domainint.dns_lookup(query) if hasattr(domainint, "dns_lookup") else {}
                 passive = domainint.passive_dns(query) if hasattr(domainint, "passive_dns") else {}
-
-                out["results"] = {
-                    "whois": whois,
-                    "dns": dns,
-                    "passive": passive,
-                }
+                out["results"] = {"whois": whois, "dns": dns, "passive": passive}
                 out["has_data"] = True
                 return out
 
-            # ARCHIVE fallback
             if archive_search and hasattr(archive_search, "search_web_archives"):
                 arch = archive_search.search_web_archives(query, ["wayback"])
                 out["results"] = {"archive": arch}
@@ -201,18 +130,8 @@ class AdvancedSearcher:
 
         return out
 
-    # ------------------------------------------------------------
-    # WEB SEARCH (DuckDuckGo)
-    # ------------------------------------------------------------
     def _search_web(self, query: str) -> Dict[str, Any]:
-        out = {
-            "source": "web",
-            "query": query,
-            "results": [],
-            "errors": [],
-            "has_data": False,
-        }
-
+        out = {"source": "web", "query": query, "results": [], "errors": [], "has_data": False}
         try:
             import urllib.parse
             import requests
@@ -227,7 +146,6 @@ class AdvancedSearcher:
             if r.status_code == 200:
                 data = r.json()
                 topics = data.get("RelatedTopics", [])
-
                 for t in topics:
                     if isinstance(t, dict) and t.get("FirstURL"):
                         out["results"].append({
@@ -253,14 +171,13 @@ class AdvancedSearcher:
 
         return out
 
-    # ------------------------------------------------------------
-    # GOOGLE DORKS
-    # ------------------------------------------------------------
+    # ✅ DORKS con soporte user_id + dorks_file
     def _search_dorks(
         self,
         query: str,
         extra_queries: Optional[List[str]] = None,
-        dorks_file: Optional[str] = None,  # ✅ NUEVO
+        dorks_file: Optional[str] = None,
+        user_id: int = 1,
     ) -> Dict[str, Any]:
         out = {
             "source": "dorks",
@@ -268,27 +185,23 @@ class AdvancedSearcher:
             "results": [],
             "errors": [],
             "has_data": False,
-            # ✅ NUEVO: para UI/debug
             "dorks_file": dorks_file,
         }
 
         try:
             if google_dorks and hasattr(google_dorks, "search_google_dorks"):
                 queries: List[str] = [query]
-
                 for candidate in extra_queries or []:
                     if candidate and candidate not in queries:
                         queries.append(candidate)
 
                 aggregated: List[Dict[str, Any]] = []
-
                 for q in queries:
-                    # ✅ NUEVO: pasar dorks_file
                     q_results = google_dorks.search_google_dorks(
                         q,
-                        dorks_file=dorks_file,
+                        user_id=user_id,          # ✅ NUEVO
+                        dorks_file=dorks_file,    # ✅ NUEVO
                     )
-
                     if isinstance(q_results, list):
                         aggregated.extend(q_results)
 
@@ -301,9 +214,6 @@ class AdvancedSearcher:
 
         return out
 
-    # ------------------------------------------------------------
-    # BUSCADOR MULTIFUENTE
-    # ------------------------------------------------------------
     def search_multiple_sources(
         self,
         query: str,
@@ -311,7 +221,7 @@ class AdvancedSearcher:
         email: str = "",
         username: Optional[str] = None,
         user_id: int = 1,
-        dorks_file: Optional[str] = None,  # ✅ NUEVO
+        dorks_file: Optional[str] = None,
     ):
         start = time.time()
         results: Dict[str, Any] = {}
@@ -323,11 +233,7 @@ class AdvancedSearcher:
                 searched.append("people")
 
             if "email" in sources:
-                results["email"] = self._search_email(
-                    query,
-                    email=email,
-                    user_id=user_id,
-                )
+                results["email"] = self._search_email(query, email=email, user_id=user_id)
                 searched.append("email")
 
             if "domain" in sources:
@@ -344,14 +250,14 @@ class AdvancedSearcher:
 
             if "dorks" in sources:
                 extra_dorks: List[str] = []
-
                 if email and "@" in email and email != query:
                     extra_dorks.append(email)
 
                 results["dorks"] = self._search_dorks(
                     query,
                     extra_queries=extra_dorks,
-                    dorks_file=dorks_file,  # ✅ NUEVO
+                    dorks_file=dorks_file,
+                    user_id=user_id,   # ✅ NUEVO
                 )
                 searched.append("dorks")
 
@@ -367,30 +273,10 @@ class AdvancedSearcher:
 
         return results
 
-    # ------------------------------------------------------------
-    # FILTROS SECUNDARIOS
-    # ------------------------------------------------------------
-    def search_with_filtering(
-        self,
-        query: str,
-        sources: List[str],
-        username=None,
-        filters=None,
-        user_id=1,
-    ):
-        base = self.search_multiple_sources(
-            query,
-            sources,
-            username=username,
-            user_id=user_id,
-        )
-        # Filtros avanzados (sin implementar aún)
+    def search_with_filtering(self, query: str, sources: List[str], username=None, filters=None, user_id=1):
+        base = self.search_multiple_sources(query, sources, username=username, user_id=user_id)
         return base
 
-
-# ================================================================
-# Funciones de módulo accesibles por import
-# ================================================================
 
 advanced_searcher = AdvancedSearcher()
 
@@ -419,10 +305,8 @@ def search_multiple_sources(
             email_result=results.get("email"),
             social_result=results.get("social"),
         )
-
         if unified_profile and unified_profile.get("confidence_score", 0) > 0:
             results["unified_profile"] = unified_profile
-
     except Exception as e:
         logger.warning(f"Profile unification failed: {e}")
 

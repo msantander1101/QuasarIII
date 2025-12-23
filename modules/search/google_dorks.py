@@ -1,37 +1,32 @@
 """
 Módulo de Google Dorks para QuasarIII
 
-Este módulo genera consultas de búsqueda avanzadas (google dorks) y,
-dependiendo de las claves disponibles, consulta SerpAPI, Google Custom Search
-o DuckDuckGo para obtener resultados reales.
+Genera dorks y consulta SerpAPI, Google CSE o DuckDuckGo.
+Las API keys se obtienen preferentemente desde ConfigManager (DB) por user_id.
 """
 
 import time
 import os
+import logging
 import requests
 from typing import Any, List, Dict, Optional, Iterable
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse, parse_qs, unquote
 import re
 from functools import lru_cache
 from bs4 import BeautifulSoup
 
-# ✅ NUEVO: loader externo
 from utils.dorks_loader import load_dorks_txt, load_dorks_json, guess_loader
+from core.config_manager import config_manager  # ✅ NUEVO
+
+logger = logging.getLogger(__name__)
 
 
 def _search_serpapi(dork_q: str, limit: int, serpapi_key: str) -> List[Dict[str, Any]]:
-    """Búsqueda usando SerpAPI."""
     if not serpapi_key:
         return []
-
     try:
         url = "https://serpapi.com/search"
-        params = {
-            "engine": "google",
-            "q": dork_q,
-            "api_key": serpapi_key,
-            "num": limit,
-        }
+        params = {"engine": "google", "q": dork_q, "api_key": serpapi_key, "num": limit}
         resp = requests.get(url, params=params, timeout=30)
         if resp.status_code == 200:
             data = resp.json()
@@ -41,29 +36,24 @@ def _search_serpapi(dork_q: str, limit: int, serpapi_key: str) -> List[Dict[str,
                     "url": item.get("link"),
                     "snippet": item.get("snippet"),
                     "source": "SerpAPI",
+                    "engine": "serpapi",
                     "confidence": 0.90,
                     "timestamp": time.time(),
                 }
                 for item in data.get("organic_results", [])[:limit]
             ]
-    except Exception:
-        pass
+        logger.debug("SerpAPI non-200: %s %s", resp.status_code, resp.text[:200])
+    except Exception as e:
+        logger.debug("SerpAPI exception: %s", e)
     return []
 
 
 def _search_google_cse(dork_q: str, limit: int, google_api_key: str, google_cx: str) -> List[Dict[str, Any]]:
-    """Búsqueda usando Google Custom Search."""
     if not (google_api_key and google_cx):
         return []
-
     try:
         url = "https://www.googleapis.com/customsearch/v1"
-        params = {
-            "key": google_api_key,
-            "cx": google_cx,
-            "q": dork_q,
-            "num": limit,
-        }
+        params = {"key": google_api_key, "cx": google_cx, "q": dork_q, "num": min(limit, 10)}
         resp = requests.get(url, params=params, timeout=20)
         if resp.status_code == 200:
             data = resp.json()
@@ -73,19 +63,36 @@ def _search_google_cse(dork_q: str, limit: int, google_api_key: str, google_cx: 
                     "url": item.get("link"),
                     "snippet": item.get("snippet"),
                     "source": "Google CSE",
+                    "engine": "google_cse",
                     "confidence": 0.85,
                     "timestamp": time.time(),
                 }
                 for item in data.get("items", [])[:limit]
             ]
-    except Exception:
-        pass
+        logger.debug("Google CSE non-200: %s %s", resp.status_code, resp.text[:200])
+    except Exception as e:
+        logger.debug("Google CSE exception: %s", e)
     return []
 
 
+def _extract_ddg_redirect(href: str) -> str:
+    try:
+        if not href:
+            return href
+        if href.startswith("/l/") or "duckduckgo.com/l/" in href:
+            if href.startswith("/"):
+                href = "https://duckduckgo.com" + href
+            parsed = urlparse(href)
+            qs = parse_qs(parsed.query)
+            if "uddg" in qs and qs["uddg"]:
+                return unquote(qs["uddg"][0])
+        return href
+    except Exception:
+        return href
+
+
 def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, Any]]:
-    """Búsqueda usando DuckDuckGo."""
-    # Intento 1: API JSON (RelatedTopics)
+    # API JSON
     try:
         api_url = (
             f"https://api.duckduckgo.com/?q={quote_plus(dork_q)}"
@@ -106,65 +113,57 @@ def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, Any]]:
                             'url': item.get('FirstURL', '#'),
                             'snippet': item.get('Text', ''),
                             'source': 'DuckDuckGo',
-                            'confidence': 0.75,
+                            'engine': 'ddg_api',
+                            'confidence': 0.55,
                             'timestamp': time.time(),
                         })
                 return subresults
 
-            if 'RelatedTopics' in data:
-                extracted = extract_topics(data['RelatedTopics'])
-                if extracted:
-                    return extracted[:limit]
-    except Exception:
-        pass
+            extracted = extract_topics(data.get('RelatedTopics', []))
+            if extracted:
+                return extracted[:limit]
+    except Exception as e:
+        logger.debug("DDG API exception: %s", e)
 
-    # Intento 2: HTML scraping (modo sin clave)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; QuasarIII/1.0)",
+        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    }
+
+    # lite (más estable)
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; QuasarIII/1.0)",
-            "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-        }
         html_resp = requests.get(
-            "https://duckduckgo.com/html/", params={"q": dork_q}, headers=headers, timeout=15
+            "https://lite.duckduckgo.com/lite/",
+            params={"q": dork_q},
+            headers=headers,
+            timeout=15,
         )
-
-        if html_resp.status_code == 200:
+        if html_resp.status_code == 200 and html_resp.text:
             soup = BeautifulSoup(html_resp.text, "html.parser")
-            results = []
-
-            for res in soup.select("div.result"):
-                link_el = res.select_one("a.result__a")
-                if not link_el:
-                    continue
-
-                title = link_el.get_text(strip=True) or "Sin título"
-                url = link_el.get("href") or "#"
-                snippet_el = res.select_one("a.result__snippet") or res.select_one("div.result__snippet")
-                snippet = snippet_el.get_text(" ", strip=True) if snippet_el else ""
-
+            results: List[Dict[str, Any]] = []
+            for a in soup.select("a.result-link"):
+                title = a.get_text(strip=True) or "Sin título"
+                href = a.get("href") or ""
+                url = _extract_ddg_redirect(href)
                 results.append({
                     "title": title,
-                    "url": url,
-                    "snippet": snippet,
+                    "url": url or "#",
+                    "snippet": "",
                     "source": "DuckDuckGo",
-                    "confidence": 0.70,
+                    "engine": "ddg_lite",
+                    "confidence": 0.65,
                     "timestamp": time.time(),
                 })
-
                 if len(results) >= limit:
                     break
-
             if results:
                 return results
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("DDG lite exception: %s", e)
 
     return []
 
 
-# -------------------------------------------------------------------------
-# 🔥 DORKS PROFESIONALES POR DEFECTO (OSINT + HUELLA DIGITAL)
-# -------------------------------------------------------------------------
 DEFAULT_DORKS = [
     'intext:"{}" site:linkedin.com/in',
     'intext:"{}" site:instagram.com',
@@ -203,29 +202,17 @@ DEFAULT_DORKS = [
 
 
 def _deduplicate_preserve_order(items: Iterable[str]) -> List[str]:
-    """Elimina duplicados preservando el orden de los elementos."""
     seen = set()
-    unique_items = []
+    out = []
     for item in items:
         if item not in seen:
-            unique_items.append(item)
+            out.append(item)
             seen.add(item)
-    return unique_items
+    return out
 
 
-# ✅ NUEVO: carga opcional desde fichero (txt o json)
 def _load_patterns_from_file(dorks_file: str) -> Dict[str, Any]:
-    """
-    Devuelve:
-      {
-        "patterns": List[str] | None,
-        "profiled_map": Dict[str, List[str]] | None
-      }
-    - TXT: patterns = lista completa; profiled_map = None
-    - JSON: patterns = data.get("default"); profiled_map = data sin "default"
-    """
     mode = guess_loader(dorks_file)
-
     if mode == "json":
         data = load_dorks_json(dorks_file)
         if not data:
@@ -234,7 +221,6 @@ def _load_patterns_from_file(dorks_file: str) -> Dict[str, Any]:
         profiled = {k: v for k, v in data.items() if k != "default"}
         return {"patterns": default or None, "profiled_map": profiled or None}
 
-    # txt
     patterns = load_dorks_txt(dorks_file)
     return {"patterns": patterns or None, "profiled_map": None}
 
@@ -243,27 +229,18 @@ def build_dork_queries(query: str,
                        patterns: Optional[List[str]] = None,
                        include_profiled: bool = True,
                        max_patterns: Optional[int] = None) -> List[Dict[str, str]]:
-    """Normaliza y genera dorks listos para ejecutarse."""
     seed_patterns: List[str] = []
-
     if patterns:
         seed_patterns.extend(patterns)
-
     if include_profiled and not patterns:
         seed_patterns.extend(generate_profiled_dorks(query))
-
     if not seed_patterns:
         seed_patterns.extend(DEFAULT_DORKS)
 
-    normalized_patterns = _deduplicate_preserve_order(
-        [p.strip() for p in seed_patterns if p]
-    )
+    normalized_patterns = _deduplicate_preserve_order([p.strip() for p in seed_patterns if p])
 
     output: List[Dict[str, str]] = []
-
     for pattern in normalized_patterns:
-        # ✅ FIX: antes solo formateabas si "{}" in pattern
-        # Ahora formateamos si hay llaves, y si falla no rompemos.
         try:
             formatted_query = pattern.format(query) if ("{" in pattern and "}" in pattern) else pattern
         except Exception:
@@ -285,43 +262,40 @@ def build_dork_queries(query: str,
     return output
 
 
-def search_google_dorks(query: str,
-                        patterns: Optional[List[str]] = None,
-                        max_results: int = 10,
-                        serpapi_key: Optional[str] = None,
-                        google_api_key: Optional[str] = None,
-                        google_cx: Optional[str] = None,
-                        max_patterns: Optional[int] = None,
-                        include_profiled: bool = True,
-                        dorks_file: Optional[str] = None) -> List[Dict[str, Any]]:
-    """
-    Busca utilizando dorks en buscadores.
-    """
+def search_google_dorks(
+    query: str,
+    patterns: Optional[List[str]] = None,
+    max_results: int = 10,
+    serpapi_key: Optional[str] = None,
+    google_api_key: Optional[str] = None,
+    google_cx: Optional[str] = None,
+    max_patterns: Optional[int] = None,
+    include_profiled: bool = True,
+    dorks_file: Optional[str] = None,
+    user_id: int = 1,  # ✅ NUEVO: para ConfigManager
+) -> List[Dict[str, Any]]:
     if not query:
         return []
 
-    # Recuperación de claves vía entorno
-    serpapi_key = serpapi_key or os.getenv('SERPAPI_API_KEY')
-    google_api_key = google_api_key or os.getenv('GOOGLE_API_KEY')
-    google_cx = google_cx or os.getenv('GOOGLE_CUSTOM_SEARCH_CX')
+    # ✅ Prefer DB (ConfigManager), fallback a env por compatibilidad
+    serpapi_key = serpapi_key or config_manager.get_config(user_id, "serpapi_api_key") or os.getenv("SERPAPI_API_KEY")
+    google_api_key = google_api_key or config_manager.get_config(user_id, "google_api_key") or os.getenv("GOOGLE_API_KEY")
+    google_cx = google_cx or config_manager.get_config(user_id, "google_custom_search_cx") or os.getenv("GOOGLE_CUSTOM_SEARCH_CX")
 
-    # ✅ NUEVO: fichero de dorks por env o parámetro
     dorks_file = dorks_file or os.getenv("QUASAR_DORKS_FILE")
 
-    # ✅ NUEVO: soporte txt/json
-    profiled_map: Optional[Dict[str, List[str]]] = None
+    engine = "ddg"
+    if serpapi_key:
+        engine = "serpapi"
+    elif google_api_key and google_cx:
+        engine = "google_cse"
+
     if dorks_file:
         loaded = _load_patterns_from_file(dorks_file)
-        # Si TXT: patterns = lista completa
-        # Si JSON: patterns = "default"
         if loaded.get("patterns"):
             patterns = loaded["patterns"]
-            # Si el usuario te pasa lista explícita, suele ser mejor NO mezclar perfilado
             include_profiled = False
-        if loaded.get("profiled_map"):
-            profiled_map = loaded["profiled_map"]
 
-    # Determinar qué motor de búsqueda usar
     if serpapi_key:
         search_method = lambda q, lim: _search_serpapi(q, lim, serpapi_key)
     elif google_api_key and google_cx:
@@ -329,7 +303,6 @@ def search_google_dorks(query: str,
     else:
         search_method = _search_duckduckgo
 
-    # ✅ Si cargaste JSON con dorks por tipo, puedes usarlo en el perfilador
     dork_entries = build_dork_queries(
         query,
         patterns=patterns,
@@ -343,20 +316,13 @@ def search_google_dorks(query: str,
         pattern = entry["pattern"]
         google_url = entry["google_url"]
 
-        # Refuerzo de intext para patrones muy simples
-        if "intext:" not in dork_query and query.strip():
-            if not any(token in dork_query for token in ["site:", "filetype:", "inurl:"]):
-                quoted = f'"{query}"' if " " in query else query
-                dork_query = f"intext:{quoted} {dork_query}".strip()
-                google_url = f"https://www.google.com/search?q={quote_plus(dork_query)}"
-
-        subresults = search_method(dork_query, min(3, max_results))
-
+        subresults = search_method(dork_query, min(5, max_results))
         if not isinstance(subresults, list):
             subresults = []
 
         results.append({
             "source": "google_dorks",
+            "engine": engine,
             "query": dork_query,
             "pattern": pattern,
             "title": f"Google Dork: {pattern}",
@@ -371,13 +337,8 @@ def search_google_dorks(query: str,
     return results
 
 
-# ==========================================================================
-# PERFILADOR AUTOMÁTICO DE DORKS PARA QUASARIII
-# ==========================================================================
-
 @lru_cache(maxsize=1024)
 def classify_query_type(query: str) -> str:
-    """Detecta automáticamente qué tipo de dato se está investigando."""
     query = query.strip()
 
     if re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", query):
@@ -459,14 +420,10 @@ _DORKS_BY_TYPE = {
 
 
 def get_dorks_for_type(query_type: str) -> List[str]:
-    """Obtiene dorks basados en el tipo de consulta."""
     return _DORKS_BY_TYPE.get(query_type, [])
 
 
 def generate_profiled_dorks(query: str, user_patterns: Optional[List[str]] = None) -> List[str]:
-    """
-    Genera dorks automáticamente basados en el tipo de consulta.
-    """
     if user_patterns:
         return [pattern.format(query) if ("{" in pattern and "}" in pattern) else pattern for pattern in user_patterns]
 
@@ -483,6 +440,5 @@ def generate_profiled_dorks(query: str, user_patterns: Optional[List[str]] = Non
     return expanded
 
 
-# Alias de funciones para mantener compatibilidad
 search_dorks = search_google_dorks
 search = search_google_dorks

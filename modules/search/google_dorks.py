@@ -3,10 +3,11 @@ Módulo de Google Dorks para QuasarIII
 
 Genera dorks y consulta SerpAPI, Google CSE o DuckDuckGo (best-effort).
 ✅ Keys desde ConfigManager (DB) por user_id (con fallback env).
-✅ Filtrado por site: para evitar falsos positivos.
-✅ Fallback inteligente con variantes para aumentar hallazgos.
+✅ Filtrado por site: para evitar falsos positivos (con normalización de redirects).
+✅ Fallback inteligente con variantes y por motor (SerpAPI → CSE → DDG).
 ✅ Devuelve metadata útil para UI (engine, has_key, counts, hint...).
 ✅ Logging útil (engine, queries, hits, hints, errores SERP).
+✅ Soporta only_with_hits: si True, devuelve SOLO entries con hits reales.
 """
 
 import time
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------
-# Helpers URL / site filtering
+# URL helpers (redirect normalization)
 # ---------------------------------------------------------------------
 
 def _domain(url: str) -> str:
@@ -36,10 +37,41 @@ def _domain(url: str) -> str:
         return ""
 
 
+def _normalize_redirect_url(u: str) -> str:
+    """
+    Normaliza URLs típicas de redirect:
+      - https://www.google.com/url?q=<REAL_URL>&...
+      - https://duckduckgo.com/l/?uddg=<REAL_URL>
+    Devuelve la URL real si puede, sino la original.
+    """
+    try:
+        if not u:
+            return u
+
+        parsed = urlparse(u)
+        host = (parsed.netloc or "").lower()
+
+        # Google redirect
+        if "google." in host and parsed.path.startswith("/url"):
+            qs = parse_qs(parsed.query)
+            if "q" in qs and qs["q"]:
+                return qs["q"][0]
+
+        # DuckDuckGo redirect
+        if "duckduckgo.com" in host and (parsed.path.startswith("/l/") or parsed.path.startswith("/l")):
+            qs = parse_qs(parsed.query)
+            if "uddg" in qs and qs["uddg"]:
+                return unquote(qs["uddg"][0])
+
+        return u
+    except Exception:
+        return u
+
+
 def _filter_by_site_operator(dork_query: str, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Si el dork lleva site:example.com, filtra hits para que coincidan con ese dominio.
-    Evita falsos positivos (ej: devuelve LinkedIn aunque el dork diga pastebin).
+    IMPORTANTE: normaliza redirects antes de extraer el dominio.
     """
     m = re.search(r"site:([a-zA-Z0-9\.\-]+)", dork_query)
     if not m:
@@ -49,8 +81,15 @@ def _filter_by_site_operator(dork_query: str, hits: List[Dict[str, Any]]) -> Lis
     filtered: List[Dict[str, Any]] = []
 
     for h in hits:
-        u = (h.get("url") or "").strip()
-        d = _domain(u).lstrip("www.")
+        raw_url = (h.get("url") or "").strip()
+        real_url = _normalize_redirect_url(raw_url) or raw_url
+
+        # guardamos la url real para la UI
+        if real_url and real_url != raw_url:
+            h["url_original"] = raw_url
+            h["url"] = real_url
+
+        d = _domain(real_url).lstrip("www.")
         if d == site or d.endswith("." + site):
             filtered.append(h)
 
@@ -62,22 +101,12 @@ def _filter_by_site_operator(dork_query: str, hits: List[Dict[str, Any]]) -> Lis
 # ---------------------------------------------------------------------
 
 def _search_serpapi_raw(dork_q: str, limit: int, serpapi_key: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    """
-    Devuelve (hits, error_msg).
-    error_msg puede contener el campo "error" de SerpAPI, p.ej:
-    "Google hasn't returned any results for this query."
-    """
     if not serpapi_key:
         return [], None
 
     try:
         url = "https://serpapi.com/search"
-        params = {
-            "engine": "google",
-            "q": dork_q,
-            "api_key": serpapi_key,
-            "num": limit,
-        }
+        params = {"engine": "google", "q": dork_q, "api_key": serpapi_key, "num": limit}
 
         t0 = time.time()
         resp = requests.get(url, params=params, timeout=30)
@@ -90,11 +119,13 @@ def _search_serpapi_raw(dork_q: str, limit: int, serpapi_key: str) -> Tuple[List
 
         data = resp.json() if resp.text else {}
         err = data.get("error")
+
         if err:
             logger.debug("[dorks:serpapi] api_error=%s", err)
 
-        hits = [
-            {
+        hits = []
+        for item in data.get("organic_results", [])[:limit]:
+            hits.append({
                 "title": item.get("title"),
                 "url": item.get("link"),
                 "snippet": item.get("snippet"),
@@ -102,14 +133,12 @@ def _search_serpapi_raw(dork_q: str, limit: int, serpapi_key: str) -> Tuple[List
                 "engine": "serpapi",
                 "confidence": 0.90,
                 "timestamp": time.time(),
-            }
-            for item in data.get("organic_results", [])[:limit]
-        ]
+            })
 
         logger.debug("[dorks:serpapi] hits=%s", len(hits))
         return hits, err
 
-    except Exception as e:
+    except Exception:
         logger.exception("[dorks:serpapi] exception")
         return [], "serpapi_exception"
 
@@ -131,22 +160,18 @@ def _search_google_cse(dork_q: str, limit: int, google_api_key: str, google_cx: 
         if resp.status_code == 200:
             data = resp.json()
             items = data.get("items", [])[:limit]
-            hits = [
-                {
-                    "title": item.get("title"),
-                    "url": item.get("link"),
-                    "snippet": item.get("snippet"),
-                    "source": "Google CSE",
-                    "engine": "google_cse",
-                    "confidence": 0.85,
-                    "timestamp": time.time(),
-                }
-                for item in items
-            ]
+            hits = [{
+                "title": item.get("title"),
+                "url": item.get("link"),
+                "snippet": item.get("snippet"),
+                "source": "Google CSE",
+                "engine": "google_cse",
+                "confidence": 0.85,
+                "timestamp": time.time(),
+            } for item in items]
             logger.debug("[dorks:cse] hits=%s", len(hits))
             return hits
 
-        # si falla, intenta loguear cuerpo corto
         try:
             logger.debug("[dorks:cse] body=%s", (resp.text or "")[:200])
         except Exception:
@@ -158,27 +183,8 @@ def _search_google_cse(dork_q: str, limit: int, google_api_key: str, google_cx: 
     return []
 
 
-def _extract_ddg_redirect(href: str) -> str:
-    try:
-        if not href:
-            return href
-        if href.startswith("/l/") or "duckduckgo.com/l/" in href:
-            if href.startswith("/"):
-                href = "https://duckduckgo.com" + href
-            parsed = urlparse(href)
-            qs = parse_qs(parsed.query)
-            if "uddg" in qs and qs["uddg"]:
-                return unquote(qs["uddg"][0])
-        return href
-    except Exception:
-        return href
-
-
 def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, Any]]:
-    """
-    Best-effort sin key.
-    """
-    # 1) JSON API (no siempre devuelve SERP real)
+    # 1) JSON API
     try:
         api_url = (
             f"https://api.duckduckgo.com/?q={quote_plus(dork_q)}"
@@ -187,7 +193,6 @@ def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, Any]]:
         t0 = time.time()
         response = requests.get(api_url, timeout=10)
         dt = round(time.time() - t0, 3)
-
         logger.debug("[dorks:ddg_api] http=%s time=%ss q=%s", response.status_code, dt, dork_q)
 
         if response.status_code == 200:
@@ -216,12 +221,12 @@ def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, Any]]:
     except Exception:
         pass
 
+    # 2) lite scraping
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; QuasarIII/1.0)",
         "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
     }
 
-    # 2) lite (mejor para scraping básico)
     try:
         t0 = time.time()
         html_resp = requests.get(
@@ -231,7 +236,6 @@ def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, Any]]:
             timeout=15,
         )
         dt = round(time.time() - t0, 3)
-
         logger.debug("[dorks:ddg_lite] http=%s time=%ss q=%s", html_resp.status_code, dt, dork_q)
 
         if html_resp.status_code == 200 and html_resp.text:
@@ -241,7 +245,7 @@ def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, Any]]:
             for a in soup.select("a.result-link"):
                 title = a.get_text(strip=True) or "Sin título"
                 href = a.get("href") or ""
-                url = _extract_ddg_redirect(href)
+                url = _normalize_redirect_url(href)
 
                 results.append({
                     "title": title,
@@ -269,18 +273,16 @@ def _search_duckduckgo(dork_q: str, limit: int) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------
 
 DEFAULT_DORKS = [
-    'intext:"{}" site:linkedin.com/in',
-    'intext:"{}" site:instagram.com',
-    'intext:"{}" site:twitter.com',
-    'intext:"{}" site:t.me',
-    'intext:"{}" site:keybase.io',
-    'intext:"{}" site:pastebin.com',
-    'intext:"{}" site:ghostbin.com',
-    'intext:"{}" site:dpaste.org',
-    'intext:"{}" filetype:txt "password"',
-    'intext:"{}" "data breach"',
-    'intext:"{}" "leaked"',
-    'intext:"{}" "credential"',
+    'site:linkedin.com/in "{}"',
+    'site:instagram.com "{}"',
+    'site:x.com "{}"',
+    'site:twitter.com "{}"',
+    'site:t.me "{}"',
+    'site:keybase.io "{}"',
+    'site:github.com "{}"',
+    'site:gitlab.com "{}"',
+    '"{}" (cv OR "curriculum vitae" OR resume)',
+    '"{}" (bio OR biography OR "about me")',
 ]
 
 
@@ -316,13 +318,10 @@ def build_dork_queries(
     max_patterns: Optional[int] = None
 ) -> List[Dict[str, str]]:
     seed: List[str] = []
-
     if patterns:
         seed.extend(patterns)
-
     if include_profiled and not patterns:
         seed.extend(generate_profiled_dorks(query))
-
     if not seed:
         seed.extend(DEFAULT_DORKS)
 
@@ -366,44 +365,43 @@ def search_google_dorks(
     include_profiled: bool = True,
     dorks_file: Optional[str] = None,
     user_id: int = 1,
+    trace_id: Optional[str] = None,
+    only_with_hits: bool = False,   # ✅ IMPORTANTE
 ) -> List[Dict[str, Any]]:
     if not query:
         return []
 
-    # Keys: DB first, env fallback
     serpapi_key = serpapi_key or config_manager.get_config(user_id, "serpapi_api_key") or os.getenv("SERPAPI_API_KEY")
     google_api_key = google_api_key or config_manager.get_config(user_id, "google_api_key") or os.getenv("GOOGLE_API_KEY")
     google_cx = google_cx or config_manager.get_config(user_id, "google_custom_search_cx") or os.getenv("GOOGLE_CUSTOM_SEARCH_CX")
 
-    # dorks file: param first, env fallback
     dorks_file = dorks_file or os.getenv("QUASAR_DORKS_FILE")
 
-    engine = "ddg"
-    engine_has_key = False
-
+    # ⚙️ Orden de motores: SerpAPI -> CSE -> DDG (fallback)
+    engine_order: List[str] = []
     if serpapi_key:
-        engine = "serpapi"
-        engine_has_key = True
-    elif google_api_key and google_cx:
-        engine = "google_cse"
-        engine_has_key = True
-    else:
-        engine = "ddg"
-        engine_has_key = False
+        engine_order.append("serpapi")
+    if google_api_key and google_cx:
+        engine_order.append("google_cse")
+    engine_order.append("ddg")
+
+    primary_engine = engine_order[0]
+    engine_has_key = primary_engine in ("serpapi", "google_cse")
 
     logger.info(
-        "[dorks] engine=%s has_key=%s user_id=%s max_patterns=%s max_results=%s dorks_file=%s",
-        engine, engine_has_key, user_id, max_patterns, max_results, dorks_file
+        "[trace=%s] [dorks] engine_order=%s primary=%s has_key=%s user_id=%s max_patterns=%s max_results=%s file=%s only_with_hits=%s",
+        trace_id, engine_order, primary_engine, engine_has_key, user_id, max_patterns, max_results, dorks_file, only_with_hits
     )
 
-    # load patterns if file provided
     if dorks_file:
         loaded = _load_patterns_from_file(dorks_file)
         if loaded.get("patterns"):
             patterns = loaded["patterns"]
             include_profiled = False
-            logger.info("[dorks] patterns loaded from file | count=%s | include_profiled=%s",
-                        len(patterns), include_profiled)
+            logger.info(
+                "[trace=%s] [dorks] patterns loaded from file | count=%s | include_profiled=%s",
+                trace_id, len(patterns), include_profiled
+            )
 
     dork_entries = build_dork_queries(
         query,
@@ -413,87 +411,115 @@ def search_google_dorks(
     )
 
     per_dork_limit = min(5, max_results)
-    logger.debug("[dorks] entries=%s per_dork_limit=%s", len(dork_entries), per_dork_limit)
-
-    def _run_search(dq: str, limit: int) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """(hits, error_msg)"""
-        if engine == "serpapi":
-            return _search_serpapi_raw(dq, limit, serpapi_key or "")
-        if engine == "google_cse":
-            return _search_google_cse(dq, limit, google_api_key or "", google_cx or ""), None
-        return _search_duckduckgo(dq, limit), None
 
     results: List[Dict[str, Any]] = []
 
-    # Para fallbacks “email pastebin”
     email_local = query.split("@")[0] if "@" in query else ""
 
     t_all = time.time()
+    executed = 0
+    skipped_no_hits = 0
+    total_hits = 0
+    serpapi_disabled = False  # si da error de pago/cuota, se desactiva para el resto
 
     for entry in dork_entries:
-        dork_query = entry["query"]
+        executed += 1
         pattern = entry["pattern"]
+        base_q = entry["query"]
 
-        logger.debug("[dorks] run pattern=%s | q=%s", pattern, dork_query)
+        logger.debug("[trace=%s] [dorks] run pattern=%s | base_q=%s", trace_id, pattern, base_q)
 
-        # ✅ Variantes + filtrado por site:
-        variants = [dork_query]
-
-        # Email + pastebin: Google puede devolver "no results"; pivot a variantes más amplias
-        if "@" in query and "site:pastebin.com" in dork_query and email_local:
+        variants = [base_q]
+        if "@" in query and "site:pastebin.com" in base_q and email_local:
             variants = [
-                dork_query,
-                f'site:pastebin.com intext:"{email_local}"',
+                base_q,
+                f'site:pastebin.com "{email_local}"',
                 f'"{email_local}" pastebin',
             ]
-            logger.debug("[dorks] variants=%s", variants)
+            logger.debug("[trace=%s] [dorks] variants=%s", trace_id, variants)
 
+        raw_hits_count = 0
+        filtered_out = 0
+        used_query = base_q
         subresults: List[Dict[str, Any]] = []
-        used_query = dork_query
         last_error: Optional[str] = None
+        engine_used: Optional[str] = None
 
         for vq in variants:
-            tmp, err = _run_search(vq, per_dork_limit)
-            last_error = err or last_error
+            # Probar motores en orden
+            for eng in engine_order:
+                if eng == "serpapi" and serpapi_disabled:
+                    continue
 
-            if err:
-                logger.debug("[dorks] engine_error=%s q=%s", err, vq)
+                if eng == "serpapi":
+                    tmp, err = _search_serpapi_raw(vq, per_dork_limit, serpapi_key or "")
+                    last_error = err or last_error
 
-            if not isinstance(tmp, list):
-                tmp = []
+                    # detectar errores de cuota / pago y desactivar serpapi
+                    if err and isinstance(err, str):
+                        low = err.lower()
+                        if any(x in low for x in ["payment", "insufficient", "balance", "quota", "limit"]):
+                            logger.warning("[trace=%s] [dorks] disabling serpapi for this run due to error=%s", trace_id, err)
+                            serpapi_disabled = True
+                elif eng == "google_cse":
+                    tmp = _search_google_cse(vq, per_dork_limit, google_api_key or "", google_cx or "")
+                    err = None
+                else:  # ddg
+                    tmp = _search_duckduckgo(vq, per_dork_limit)
+                    err = None
 
-            before = len(tmp)
-            tmp = _filter_by_site_operator(vq, tmp)
-            after = len(tmp)
-            if before != after:
-                logger.debug("[dorks] site-filter reduced hits %s -> %s for q=%s", before, after, vq)
+                if not isinstance(tmp, list):
+                    tmp = []
 
-            if tmp:
-                subresults = tmp
-                used_query = vq
-                break
+                before = len(tmp)
+                raw_hits_count = max(raw_hits_count, before)
 
-        dork_query = used_query
-        google_url = f"https://www.google.com/search?q={quote_plus(dork_query)}"
+                tmp2 = _filter_by_site_operator(vq, tmp)
+                after = len(tmp2)
+                filtered_out += max(0, before - after)
 
-        # Hint para UI
+                if before != after:
+                    logger.debug(
+                        "[trace=%s] [dorks] site-filter %s -> %s for q=%s via %s",
+                        trace_id, before, after, vq, eng
+                    )
+
+                if tmp2:
+                    subresults = tmp2
+                    used_query = vq
+                    engine_used = eng
+                    break  # no probamos más motores para esta variante
+
+            if subresults:
+                break  # ya tenemos hits, no probamos más variantes
+
         no_results_hint = None
         if not subresults:
             no_results_hint = "no_serp_hits_or_filtered"
             if isinstance(last_error, str) and "hasn't returned any results" in last_error.lower():
                 no_results_hint = "serpapi_no_results"
 
-        logger.info("[dorks] done | pattern=%s | hits=%s | used_query=%s | hint=%s",
-                    pattern, len(subresults), dork_query, no_results_hint)
+        total_hits += len(subresults)
+
+        # Si quieres ocultar dorks vacíos (lo que pediste)
+        if only_with_hits and not subresults:
+            skipped_no_hits += 1
+            continue
+
+        google_url = f"https://www.google.com/search?q={quote_plus(used_query)}"
+
+        logger.info(
+            "[trace=%s] [dorks] done | pattern=%s | hits=%s | raw_hits=%s | filtered_out=%s | used_query=%s | engine_used=%s | hint=%s",
+            trace_id, pattern, len(subresults), raw_hits_count, filtered_out, used_query, engine_used, no_results_hint
+        )
 
         results.append({
             "source": "google_dorks",
-            "engine": engine,
+            "engine": engine_used or primary_engine,
             "engine_has_key": engine_has_key,
             "limit_used": per_dork_limit,
-            "subresults_count": len(subresults),
 
-            "query": dork_query,
+            "query": used_query,
             "pattern": pattern,
             "title": f"Google Dork: {pattern}",
             "url": google_url,
@@ -502,11 +528,19 @@ def search_google_dorks(
             "timestamp": time.time(),
             "confidence": 0.80 if subresults else 0.50,
             "results": subresults,
+
+            # métricas para debug/UI
+            "subresults_count": len(subresults),
+            "raw_hits_count": raw_hits_count,
+            "filtered_out": filtered_out,
             "no_results_hint": no_results_hint,
         })
 
-    logger.info("[dorks] finished | total_entries=%s | total_time=%ss",
-                len(results), round(time.time() - t_all, 3))
+    dt_all = round(time.time() - t_all, 3)
+    logger.info(
+        "[trace=%s] [dorks] finished | patterns_total=%s executed=%s returned_entries=%s skipped_no_hits=%s total_hits=%s total_time=%ss",
+        trace_id, len(dork_entries), executed, len(results), skipped_no_hits, total_hits, dt_all
+    )
 
     return results
 
@@ -518,7 +552,6 @@ def search_google_dorks(
 @lru_cache(maxsize=1024)
 def classify_query_type(query: str) -> str:
     query = query.strip()
-
     if re.match(r"^[\w\.-]+@[\w\.-]+\.\w+$", query):
         return "email"
     if re.match(r"^\d{7,15}$", query.replace("+", "").replace(" ", "")):
@@ -538,61 +571,40 @@ def classify_query_type(query: str) -> str:
 
 _DORKS_BY_TYPE = {
     "person": [
-        'intext:"{}" site:linkedin.com/in',
-        'intext:"{}" site:facebook.com',
-        'intext:"{}" site:instagram.com',
-        'intext:"{}" "curriculum vitae"',
-        'intext:"{}" "phone number"',
-        'intext:"{}" "email"'
+        'site:linkedin.com/in "{}"',
+        'site:about.me "{}"',
+        'site:medium.com "{}"',
+        '"{}" (cv OR "curriculum vitae" OR resume)',
+        '"{}" (bio OR biography OR "about me")',
     ],
     "username": [
-        'intext:"{}" site:github.com',
-        'intext:"{}" site:gitlab.com',
-        'intext:"{}" site:keybase.io',
-        'intext:"{}" site:twitter.com',
-        'intext:"{}" site:steamcommunity.com',
-        'intext:"{}" "username" "profile"'
+        'site:github.com "{}"',
+        'site:gitlab.com "{}"',
+        'site:keybase.io "{}"',
+        'site:twitter.com "{}"',
+        'site:x.com "{}"',
+        'site:reddit.com "{}"',
     ],
     "email": [
-        'intext:"{}" site:pastebin.com',
-        'intext:"{}" site:ghostbin.com',
-        'intext:"{}" filetype:txt "password"',
-        'intext:"{}" "data breach"',
-        'intext:"{}" "leaked"',
-        'intext:"{}" "credential"'
+        '"{}" (mail OR email OR correo)',
+        '"{}" (filetype:pdf OR filetype:doc OR filetype:docx)',
     ],
     "phone": [
-        'intext:"{}" "WhatsApp"',
-        'intext:"{}" "Telegram"',
-        'intext:"{}" "contact"',
-        'intext:"{}" "lookup"',
-        'intext:"{}" "reverse phone"'
+        '"{}" ("WhatsApp" OR "Telegram" OR "Signal")',
+        '"{}" ("contact" OR "contacto")',
     ],
     "domain": [
-        'site:{}/wp-admin',
-        'site:{}/wp-content',
-        'site:{}/.git',
-        'site:{}/"index of"',
-        'site:pastebin.com "{}"',
-        'site:github.com "{}"',
+        'site:{}',
+        'site:{} (contact OR about OR team)',
     ],
     "ip": [
-        'intext:"{}" "port"',
-        'intext:"{}" "open"',
-        'intext:"{}" "ssh"',
-        'intext:"{}" "vulnerable"',
-        'intext:"{}" "camera"',
+        '"{}" (port OR open OR service)',
     ],
     "subnet": [
-        'intext:"{}" "IP range"',
-        'intext:"{}" "open services"',
-        'intext:"{}" "network"'
+        '"{}" ("IP range" OR "network")',
     ],
     "url": [
-        'intext:"{}" "index of"',
-        'intext:"{}" "backup"',
-        'intext:"{}" "config"',
-        'intext:"{}" "credentials"',
+        '"{}"',
     ],
 }
 
@@ -618,6 +630,5 @@ def generate_profiled_dorks(query: str, user_patterns: Optional[List[str]] = Non
     return expanded
 
 
-# Alias
 search_dorks = search_google_dorks
 search = search_google_dorks

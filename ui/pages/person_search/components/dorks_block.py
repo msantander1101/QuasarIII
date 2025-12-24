@@ -196,6 +196,24 @@ def _safe_int(x: Any, default: Optional[int] = None) -> Optional[int]:
         return default
 
 
+def _risk_rank(risk: Optional[str]) -> int:
+    r = (risk or "").lower()
+    if r == "high":
+        return 3
+    if r == "medium":
+        return 2
+    return 1
+
+
+def _to_float(x: Any, default: float = 0.0) -> float:
+    try:
+        if x is None:
+            return default
+        return float(x)
+    except Exception:
+        return default
+
+
 def _chip(label: str) -> str:
     return f'<span class="q3-chip">{label}</span>'
 
@@ -406,8 +424,19 @@ def render_dorks_block(dorks_block: Dict[str, Any]):
     if not cards:
         return
 
+    # ✅ Ordenación PRO (sin agrupar)
+    # prioridad: relevance desc -> risk desc -> conf desc -> domain asc (estable)
+    def _sort_key(c: Dict[str, Any]):
+        rel = _safe_int(c.get("relevance_score"), default=0) or 0
+        risk = _risk_rank(c.get("risk_level"))
+        conf = _to_float(c.get("confidence"), 0.0)
+        dom = _get_domain((c.get("url") or "").strip())
+        return (-rel, -risk, -conf, dom)
+
+    cards.sort(key=_sort_key)
+
     st.markdown("### 🕵️‍♂️ Google Dorks")
-    st.caption(f"{len(cards)} resultados extraídos")
+    st.caption(f"{len(cards)} resultados extraídos (ordenados por relevancia/riesgo/confianza)")
 
     cols = st.columns(2)
     for i, card in enumerate(cards):

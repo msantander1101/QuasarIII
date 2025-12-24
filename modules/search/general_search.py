@@ -4,14 +4,18 @@ General Search — OSINT Pasivo y Controlado
 ✔ No ejecuta fuentes sensibles automáticamente
 ✔ Diseñado como radar contextual (web, menciones, superficie)
 ✔ Compatible con arquitectura Quasar III
+✔ Delegación de dorks avanzados al módulo google_dorks
 """
 
 import logging
-import requests
 import time
-from typing import Dict, List, Any
-from urllib.parse import quote_plus
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple
+from urllib.parse import quote_plus
+
+import requests
+
 from core.config_manager import config_manager
 
 logger = logging.getLogger(__name__)
@@ -25,13 +29,13 @@ PASSIVE_SOURCES = {
     "web_search",
     "google_search",
     "bing_search",
-    "duckduckgo_search"
+    "duckduckgo_search",
 }
 
 ACTIVE_OPTIONAL_SOURCES = {
     "serpapi",
     "openai",
-    "predictasearch"
+    "predictasearch",
 }
 
 FORBIDDEN_SOURCES = {
@@ -39,14 +43,27 @@ FORBIDDEN_SOURCES = {
     "hunter",
     "shodan",
     "virustotal",
-    "whoisxml"
+    "whoisxml",
 }
+
+
+@dataclass(frozen=True)
+class SourceProfile:
+    """Describe una fuente de búsqueda disponible."""
+
+    name: str
+    mode: str  # "passive" o "active"
+    engine: str
+    requires_api: bool = False
+    api_key_name: str = ""
 
 
 class GeneralSearcher:
     """
     Buscador OSINT general PASIVO.
     No realiza enriquecimiento sensible ni correlación.
+    Se centra en un radar de superficie y delega dorks avanzados
+    al módulo especializado de google_dorks.
     """
 
     def __init__(self):
@@ -55,33 +72,41 @@ class GeneralSearcher:
             "User-Agent": "QuasarIII-GeneralSearch/1.0"
         })
         self.timeout = 20
+        self.max_workers = 4
+
+        self.source_catalog: Dict[str, SourceProfile] = {
+            "web_search": SourceProfile("web_search", "passive", "web"),
+            "google_search": SourceProfile("google_search", "passive", "google"),
+            "bing_search": SourceProfile("bing_search", "passive", "bing"),
+            "duckduckgo_search": SourceProfile("duckduckgo_search", "passive", "duckduckgo"),
+            # Activos (placeholder si se habilitan en futuro)
+            "serpapi": SourceProfile("serpapi", "active", "google", True, "serpapi_api_key"),
+            "openai": SourceProfile("openai", "active", "openai", True, "openai_api_key"),
+            "predictasearch": SourceProfile("predictasearch", "active", "predictasearch", True, "predictasearch_api_key"),
+        }
 
     # --------------------------------------------------------
     # FUENTES DISPONIBLES (solo informativo)
     # --------------------------------------------------------
     def get_user_sources(self, user_id: int) -> Dict[str, Dict]:
-        sources = {}
+        """Devuelve catálogo de fuentes y si el usuario tiene claves listas."""
 
-        # Fuentes pasivas SIEMPRE disponibles
-        for src in PASSIVE_SOURCES:
-            sources[src] = {
-                "enabled": True,
-                "requires_api": False
+        sources: Dict[str, Dict[str, Any]] = {}
+        for name, profile in self.source_catalog.items():
+            if profile.name in FORBIDDEN_SOURCES:
+                continue
+
+            info: Dict[str, Any] = {
+                "enabled": profile.mode == "passive",
+                "requires_api": profile.requires_api,
             }
 
-        # Fuentes activas opcionales (solo si hay API key)
-        for key, name in {
-            "serpapi": "serpapi",
-            "openai_api_key": "openai",
-            "predictasearch_api_key": "predictasearch"
-        }.items():
-            api_key = config_manager.get_config(user_id, key)
-            if api_key:
-                sources[name] = {
-                    "enabled": True,
-                    "requires_api": True,
-                    "api_key": api_key
-                }
+            if profile.requires_api and profile.api_key_name:
+                api_key = config_manager.get_config(user_id, profile.api_key_name)
+                info["has_api_key"] = bool(api_key)
+                info["enabled"] = bool(api_key)
+
+            sources[name] = info
 
         return sources
 
@@ -98,60 +123,107 @@ class GeneralSearcher:
     ) -> Dict[str, Any]:
 
         start = time.time()
-        logger.info(f"[GeneralSearch] query='{query}' mode={mode}")
+        clean_query = (query or "").strip()
+        logger.info("[GeneralSearch] query='%s' mode=%s", clean_query, mode)
 
-        # Modo pasivo seguro por defecto
-        if not sources:
-            sources = list(PASSIVE_SOURCES)
+        if not clean_query:
+            return {
+                "query": clean_query,
+                "intent": "contextual_search",
+                "mode": mode,
+                "sources_used": [],
+                "raw_results": {},
+                "total_results": 0,
+                "errors": ["query_empty"],
+                "skipped_sources": [],
+                "search_time": round(time.time() - start, 3),
+            }
 
-        # Filtrado por modo
-        if mode == "passive":
-            sources = [s for s in sources if s in PASSIVE_SOURCES]
+        selected_sources, skipped = self._resolve_sources(clean_query, sources, mode, user_id)
 
-        elif mode == "active":
-            sources = [
-                s for s in sources
-                if s in PASSIVE_SOURCES or s in ACTIVE_OPTIONAL_SOURCES
-            ]
-
-        # Bloqueo duro de fuentes prohibidas
-        sources = [s for s in sources if s not in FORBIDDEN_SOURCES]
-
-        results = {
-            "query": query,
+        results: Dict[str, Any] = {
+            "query": clean_query,
             "intent": "contextual_search",
             "mode": mode,
-            "sources_used": sources,
+            "sources_used": selected_sources,
+            "skipped_sources": skipped,
             "raw_results": {},
             "total_results": 0,
             "errors": [],
-            "search_time": 0.0
+            "search_time": 0.0,
         }
 
-        if not sources:
+        if not selected_sources:
             results["search_time"] = round(time.time() - start, 3)
             return results
 
-        with ThreadPoolExecutor(max_workers=min(len(sources), 4)) as executor:
-            futures = []
+        with ThreadPoolExecutor(max_workers=min(len(selected_sources), self.max_workers)) as executor:
+            futures = [
+                executor.submit(self._search_single_source, clean_query, src)
+                for src in selected_sources
+            ]
 
-            for src in sources:
-                futures.append(
-                    executor.submit(self._search_single_source, query, src)
-                )
-
-            for src, future in zip(sources, futures):
+            for src, future in zip(selected_sources, futures):
                 try:
-                    data = future.result(timeout=20)
+                    data = future.result(timeout=self.timeout)
                     if data:
-                        results["raw_results"][src] = data[:max_results]
-                        results["total_results"] += len(data)
+                        # Guardamos solo hasta max_results por fuente
+                        sliced = data[:max_results]
+                        results["raw_results"][src] = sliced
+                        results["total_results"] += len(sliced)
                 except Exception as e:
-                    logger.error(f"Error en fuente {src}: {e}")
+                    logger.error("Error en fuente %s: %s", src, e)
                     results["errors"].append(f"{src}: {str(e)}")
 
         results["search_time"] = round(time.time() - start, 3)
         return results
+
+    def _resolve_sources(
+        self,
+        query: str,
+        sources: List[str] | None,
+        mode: str,
+        user_id: int,
+    ) -> Tuple[List[str], List[Dict[str, Any]]]:
+        """
+        Filtra y normaliza fuentes solicitadas devolviendo seleccionadas y omitidas.
+        """
+
+        requested = sources or list(PASSIVE_SOURCES)
+        normalized: List[str] = []
+        skipped: List[Dict[str, Any]] = []
+
+        for src in requested:
+            name = (src or "").strip().lower()
+            if not name or name in normalized:
+                continue
+
+            if name in FORBIDDEN_SOURCES:
+                skipped.append({"source": name, "reason": "forbidden"})
+                continue
+
+            profile = self.source_catalog.get(name)
+            if not profile:
+                skipped.append({"source": name, "reason": "unknown_source"})
+                continue
+
+            if mode == "passive" and profile.mode != "passive":
+                skipped.append({"source": name, "reason": "restricted_by_mode"})
+                continue
+
+            if profile.requires_api:
+                api_key = config_manager.get_config(user_id, profile.api_key_name)
+                if not api_key:
+                    skipped.append({"source": name, "reason": "missing_api_key"})
+                    continue
+
+                # Placeholder: la fuente está definida pero aún no implementada
+                skipped.append({"source": name, "reason": "not_implemented"})
+                continue
+
+            normalized.append(name)
+
+        return normalized, skipped
 
     # --------------------------------------------------------
     # BÚSQUEDA POR FUENTE (PASIVA)
@@ -173,23 +245,43 @@ class GeneralSearcher:
 
     # --------------------------------------------------------
     # SIMULACIÓN CONTROLADA DE BÚSQUEDA WEB
+    # (sin solaparse con las búsquedas de google_dorks)
     # --------------------------------------------------------
     def _search_web(self, query: str, engine: str) -> List[Dict[str, Any]]:
+        """
+        Genera únicamente una búsqueda general por motor.
+        Cualquier dork avanzado (comillas, modificadores, etc.) se delega
+        al módulo google_dorks para evitar solapamiento.
+        """
         url_map = {
             "web": f"https://www.google.com/search?q={quote_plus(query)}",
             "google": f"https://www.google.com/search?q={quote_plus(query)}",
             "bing": f"https://www.bing.com/search?q={quote_plus(query)}",
-            "duckduckgo": f"https://duckduckgo.com/?q={quote_plus(query)}"
+            "duckduckgo": f"https://duckduckgo.com/?q={quote_plus(query)}",
         }
 
-        return [{
-            "title": f"Resultado público ({engine})",
-            "url": url_map.get(engine),
-            "snippet": f"Menciones públicas relacionadas con '{query}'",
-            "confidence": 0.65,
-            "source": engine,
-            "timestamp": time.time()
-        }]
+        base_url = url_map.get(engine)
+        timestamp = time.time()
+        context = query[:180]
+
+        if not base_url:
+            return []
+
+        # 🔹 SOLO UN RESULTADO POR MOTOR, genérico
+        return [
+            {
+                "title": f"Panorama general ({engine})",
+                "url": base_url,
+                "snippet": (
+                    f"Vista inicial de resultados públicos sobre '{context}'. "
+                    "Para dorks y consultas especializadas se utiliza el módulo "
+                    "de búsqueda avanzada (google_dorks)."
+                ),
+                "confidence": 0.65,
+                "source": engine,
+                "timestamp": timestamp,
+            }
+        ]
 
 
 # ============================================================

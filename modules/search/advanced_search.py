@@ -41,6 +41,12 @@ try:
 except Exception:
     google_dorks = None
 
+# 🔹 NUEVO: integración con el radar general de web (general_search)
+try:
+    from . import general_search
+except Exception:
+    general_search = None
+
 
 class AdvancedSearcher:
     def __init__(self, timeout: int = 20):
@@ -139,6 +145,69 @@ class AdvancedSearcher:
                 }]
         except Exception as e:
             logger.exception("Web search failed")
+            out["errors"].append(str(e))
+
+        return out
+
+    # 🔹 NUEVO: radar general web usando modules/search/general_search.py
+    def _search_general_web(
+        self,
+        query: str,
+        user_id: int = 1,
+        max_results: int = 10,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Envuelve general_search.search_general_real para integrarlo
+        en el mismo esquema de resultados que el resto de fuentes.
+        """
+        out: Dict[str, Any] = {
+            "source": "general_web",
+            "query": query,
+            "results": {},
+            "errors": [],
+            "has_data": False,
+        }
+
+        try:
+            if not general_search or not hasattr(general_search, "search_general_real"):
+                out["errors"].append("general_search module missing")
+                return out
+
+            logger.info(
+                "[trace=%s] general_web start | q=%s | max_results=%s",
+                trace_id, query, max_results
+            )
+
+            res = general_search.search_general_real(
+                query=query,
+                user_id=user_id,
+                sources=None,          # usa fuentes pasivas por defecto
+                mode="passive",
+                max_results=max_results,
+            )
+
+            out["results"] = res
+
+            total = 0
+            raw = {}
+            try:
+                raw = res.get("raw_results") or {}
+                total = int(res.get("total_results") or 0)
+            except Exception:
+                total = 0
+
+            out["has_data"] = bool(total or raw)
+
+            engines = list(raw.keys()) if isinstance(raw, dict) else []
+
+            logger.info(
+                "[trace=%s] general_web done | engines=%s | total=%s | has_data=%s",
+                trace_id, engines, total, out["has_data"]
+            )
+
+        except Exception as e:
+            logger.exception("General web radar search failed")
             out["errors"].append(str(e))
 
         return out
@@ -268,6 +337,34 @@ class AdvancedSearcher:
                             results["web"].get("has_data"),
                             len(results["web"].get("results") or []),
                             round(time.time() - t0, 3))
+
+            # 🔹 NUEVO: radar general web como fuente independiente ("general_web")
+            if "general_web" in sources:
+                t0 = time.time()
+                results["general_web"] = self._search_general_web(
+                    query,
+                    user_id=user_id,
+                    max_results=10,
+                    trace_id=trace_id,
+                )
+                searched.append("general_web")
+
+                res = results["general_web"].get("results") or {}
+                try:
+                    total = int(res.get("total_results") or 0)
+                    engines = list((res.get("raw_results") or {}).keys())
+                except Exception:
+                    total = 0
+                    engines = []
+
+                logger.info(
+                    "[trace=%s] general_web wrapper done | has_data=%s engines=%s total=%s time=%ss",
+                    trace_id,
+                    results["general_web"].get("has_data"),
+                    engines,
+                    total,
+                    round(time.time() - t0, 3)
+                )
 
             if "dorks" in sources:
                 extra_dorks: List[str] = []

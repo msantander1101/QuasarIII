@@ -19,6 +19,7 @@ from .components.socmint_block import render_socmint_block
 from .components.web_email_blocks import render_web_block, render_email_block
 from .components.darkweb_block import render_darkweb_block
 from .components.dorks_block import render_dorks_block
+from .components.general_block import render_general_block  # 🔹 NUEVO
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,8 @@ def _normalize_sources(selected: List[str]) -> List[str]:
     if not selected:
         return ["people", "email", "social"]
     if "all" in selected:
-        return ["people", "email", "social", "web", "darkweb", "dorks"]
+        # 🔹 Añadimos general_web al preset "all" sin quitar nada
+        return ["people", "email", "social", "web", "general_web", "darkweb", "dorks"]
     return selected
 
 
@@ -60,7 +62,7 @@ def show_person_search_ui():
 
     sources = st.multiselect(
         "🗂 Fuentes a consultar",
-        options=["all", "people", "email", "social", "web", "darkweb", "dorks"],
+        options=["all", "people", "email", "social", "web", "general_web", "darkweb", "dorks"],  # 🔹 añadida general_web
         default=["people", "email", "social"]
     )
 
@@ -165,6 +167,10 @@ def show_person_search_ui():
     # ========== WEB ==========
     if "web" in results:
         render_web_block(results["web"])
+
+    # ========== RADAR GENERAL WEB ==========
+    if "general_web" in results:
+        render_general_block(results["general_web"])
 
     # ========== DARKWEB ==========
     if "darkweb" in results and results["darkweb"].get("results"):

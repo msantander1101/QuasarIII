@@ -6,11 +6,12 @@ Versión final limpia, profesional y controlada.
 import time
 import logging
 import os
-from typing import List, Optional
+from typing import List
 
 import streamlit as st
 
 from modules.search.advanced_search import search_multiple_sources
+from utils.dorks_upload import save_uploaded_dorks
 
 # Componentes UI
 from .components.person_card import render_person_card
@@ -63,18 +64,35 @@ def show_person_search_ui():
         default=["people", "email", "social"]
     )
 
-    # ✅ NUEVO: Opciones avanzadas (dorks file)
+    # ------------------ ADVANCED OPTIONS ------------------
     with st.expander("⚙️ Opciones avanzadas", expanded=False):
-        default_dorks_file = os.getenv("QUASAR_DORKS_FILE", "")
-        dorks_file: str = st.text_input(
-            "📄 Archivo de dorks (opcional) — .txt o .json",
-            value=default_dorks_file,
-            key="ps_dorks_file",
-            help="Si se indica, los dorks se cargarán desde este fichero en lugar de los hardcodeados."
+        st.markdown("#### 🕵️‍♂️ Google Dorks personalizados")
+
+        uploaded_dorks = st.file_uploader(
+            "Sube un archivo de dorks (.txt o .json)",
+            type=["txt", "json"],
+            help="TXT: un dork por línea | JSON: { default: [...], email: [...], etc }"
         )
 
-        # Normalizar: si está vacío, no se pasa
-        dorks_file = dorks_file.strip()
+        dorks_file = None
+        user_id = st.session_state.get("user_id", 1)
+
+        if uploaded_dorks:
+            dorks_file = save_uploaded_dorks(
+                user_id=user_id,
+                uploaded_file=uploaded_dorks
+            )
+            if dorks_file:
+                st.success(f"Archivo cargado correctamente: {uploaded_dorks.name}")
+            else:
+                st.error("El archivo de dorks no es válido")
+
+        # Fallback: variable de entorno
+        if not dorks_file:
+            dorks_file = os.getenv("QUASAR_DORKS_FILE")
+
+        if dorks_file:
+            st.caption(f"📄 Dorks activos: `{os.path.basename(dorks_file)}`")
 
     # ------------------ ACTIONS ------------------
     cta1, cta2 = st.columns(2)
@@ -93,8 +111,8 @@ def show_person_search_ui():
                         selected_sources=_normalize_sources(sources),
                         email=email or "",
                         username=username or None,
-                        # ✅ NUEVO
                         dorks_file=dorks_file or None,
+                        user_id=user_id,
                     )
 
                 st.session_state["ps_results"] = res
@@ -143,8 +161,6 @@ def show_person_search_ui():
     # ========== EMAIL ==========
     if "email" in results:
         render_email_block(results["email"])
-    elif st.session_state.get("ps_email"):
-        st.info("Búsqueda de email no ejecutada o sin datos para mostrar.")
 
     # ========== WEB ==========
     if "web" in results:

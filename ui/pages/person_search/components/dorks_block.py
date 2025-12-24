@@ -114,7 +114,6 @@ _DORKS_CSS = """
 .q3-rel-fill{
   height: 100%;
   border-radius: 999px;
-  /* color no fijado; usamos gradiente neutro */
   background: linear-gradient(90deg, rgba(255,255,255,0.35), rgba(255,255,255,0.75));
 }
 .q3-rel-badge{
@@ -221,6 +220,8 @@ def _entity_icon(entity_type: str) -> str:
         return "📅"
     if et in ("post",):
         return "🧩"
+    if et in ("dork",):
+        return "🔎"
     return "🔎"
 
 
@@ -268,17 +269,16 @@ def _render_card(card: Dict[str, Any]):
 
     query_used = card.get("query_used")
     pattern = card.get("pattern")
-    no_results_hint = card.get("no_results_hint")
 
     domain = _get_domain(url)
     fav = _favicon_url(domain)
 
     # Chips
-    chips = []
-    chips.append(_chip(f"{_entity_icon(entity_type)} {entity_type}"))
-    chips.append(_chip(f"{_match_icon(match_type)} {match_type}"))
-    chips.append(_chip(f"{_risk_icon(risk_level)} risk:{risk_level}"))
-
+    chips = [
+        _chip(f"{_entity_icon(entity_type)} {entity_type}"),
+        _chip(f"{_match_icon(match_type)} {match_type}"),
+        _chip(f"{_risk_icon(risk_level)} risk:{risk_level}"),
+    ]
     if source:
         chips.append(_chip(f"src:{source}"))
     if engine:
@@ -298,7 +298,6 @@ def _render_card(card: Dict[str, Any]):
         micro_bits.append(f"📍 {location_hint}")
     micro_html = " ".join([f"<span>{b}</span>" for b in micro_bits]) if micro_bits else ""
 
-    # Render HTML card
     st.markdown(
         f"""
         <div class="q3-card">
@@ -336,18 +335,15 @@ def _render_card(card: Dict[str, Any]):
         if query_used:
             st.caption("Consulta ejecutada")
             st.code(query_used)
-        if no_results_hint:
-            st.caption("Hint")
-            st.code(str(no_results_hint))
         st.caption("URL")
         st.code(url)
 
 
 def _flatten_dorks_results(dorks_block: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Convierte dorks_block (entries) en lista plana de tarjetas:
-    - Si hay subresults: cada hit -> tarjeta
-    - Si no hay subresults: tarjeta “dork ejecutado” (para abrir en Google)
+    ✅ NUEVO COMPORTAMIENTO:
+    - Solo devuelve tarjetas si HAY subresults reales.
+    - Si un dork no extrae nada => NO se añade nada.
     """
     entries = dorks_block.get("results") or []
     flat: List[Dict[str, Any]] = []
@@ -358,11 +354,9 @@ def _flatten_dorks_results(dorks_block: Dict[str, Any]) -> List[Dict[str, Any]]:
 
         pattern = entry.get("pattern") or entry.get("title") or "Dork"
         q_used = entry.get("query") or ""
-        google_url = entry.get("google_url") or entry.get("url") or "#"
         source = entry.get("source") or "google_dorks"
         engine = entry.get("engine")
         confidence = entry.get("confidence")
-        no_results_hint = entry.get("no_results_hint")
 
         sub = entry.get("results")
         if isinstance(sub, list) and sub:
@@ -370,7 +364,6 @@ def _flatten_dorks_results(dorks_block: Dict[str, Any]) -> List[Dict[str, Any]]:
                 if not isinstance(hit, dict):
                     continue
                 flat.append({
-                    # base
                     "title": hit.get("title") or "Sin título",
                     "url": hit.get("url") or hit.get("link") or "#",
                     "snippet": hit.get("snippet") or "",
@@ -378,7 +371,7 @@ def _flatten_dorks_results(dorks_block: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "engine": hit.get("engine") or engine,
                     "confidence": hit.get("confidence") if hit.get("confidence") is not None else confidence,
 
-                    # ✅ FASE 2 (si viene enriquecido)
+                    # (si viene enriquecido)
                     "entity_type": hit.get("entity_type"),
                     "match_type": hit.get("match_type"),
                     "relevance_score": hit.get("relevance_score"),
@@ -390,58 +383,32 @@ def _flatten_dorks_results(dorks_block: Dict[str, Any]) -> List[Dict[str, Any]]:
                     # meta técnico
                     "query_used": q_used,
                     "pattern": pattern,
-                    "no_results_hint": None,
                 })
-        else:
-            # Tarjeta “sin extracción”
-            flat.append({
-                "title": pattern,
-                "url": google_url,
-                "snippet": entry.get("description") or "Sin extracción automática en esta ejecución. Abre el dork para investigar manualmente.",
-                "source": source,
-                "engine": engine,
-                "confidence": confidence,
-                "entity_type": "dork",
-                "match_type": "contextual",
-                "relevance_score": 35,
-                "published_at": None,
-                "location_hint": None,
-                "risk_level": "low",
-                "linked_to_profile": None,
-                "query_used": q_used,
-                "pattern": pattern,
-                "no_results_hint": no_results_hint,
-            })
 
     return flat
 
 
 def render_dorks_block(dorks_block: Dict[str, Any]):
-    st.markdown("### 🕵️‍♂️ Google Dorks")
-
+    # Si no es dict, fuera
     if not isinstance(dorks_block, dict):
-        st.info("No hay resultados de dorks")
         return
 
     # CSS (una vez)
     st.markdown(_DORKS_CSS, unsafe_allow_html=True)
 
-    # errores
+    # errores (si quieres mantenerlos visibles)
     for err in dorks_block.get("errors") or []:
         st.warning(f"Dorks: {err}")
 
     cards = _flatten_dorks_results(dorks_block)
 
+    # ✅ Si NO hay hits reales => NO mostramos bloque
     if not cards:
-        st.info("No hay resultados de dorks")
         return
 
-    extracted = sum(1 for c in cards if (c.get("entity_type") or "") != "dork")
-    no_extract = sum(1 for c in cards if (c.get("entity_type") or "") == "dork")
+    st.markdown("### 🕵️‍♂️ Google Dorks")
+    st.caption(f"{len(cards)} resultados extraídos")
 
-    st.caption(f"{extracted} resultados extraídos • {no_extract} dorks sin extracción")
-
-    # Grid real con columns
     cols = st.columns(2)
     for i, card in enumerate(cards):
         with cols[i % 2]:

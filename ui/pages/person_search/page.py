@@ -20,6 +20,7 @@ from .components.web_email_blocks import render_web_block, render_email_block
 from .components.darkweb_block import render_darkweb_block
 from .components.dorks_block import render_dorks_block
 from .components.general_block import render_general_block  # 🔹 NUEVO
+from .components.breach_block import render_breach_block    # 🔹 NUEVO: brechas
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +31,17 @@ def _normalize_sources(selected: List[str]) -> List[str]:
     if not selected:
         return ["people", "email", "social"]
     if "all" in selected:
-        # 🔹 Añadimos general_web al preset "all" sin quitar nada
-        return ["people", "email", "social", "web", "general_web", "darkweb", "dorks"]
+        # 🔹 Añadimos general_web y breach al preset "all" sin quitar nada
+        return [
+            "people",
+            "email",
+            "social",
+            "web",
+            "general_web",
+            "darkweb",
+            "dorks",
+            "breach",    # 🔹 NUEVO: brechas
+        ]
     return selected
 
 
@@ -44,7 +54,7 @@ def show_person_search_ui():
                 padding:18px;border-radius:12px;margin-bottom:20px">
         <h1 style="color:white;margin:0">🧠 Person Intelligence Search</h1>
         <p style="color:#dce6ff;margin-top:8px">
-            OSINT • SOCMINT • Email • Web — ejecución bajo demanda
+            OSINT • SOCMINT • Email • Web • Dorks • Brechas — ejecución bajo demanda
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -62,7 +72,17 @@ def show_person_search_ui():
 
     sources = st.multiselect(
         "🗂 Fuentes a consultar",
-        options=["all", "people", "email", "social", "web", "general_web", "darkweb", "dorks"],  # 🔹 añadida general_web
+        options=[
+            "all",
+            "people",
+            "email",
+            "social",
+            "web",
+            "general_web",
+            "darkweb",
+            "dorks",
+            "breach",      # 🔹 NUEVO: brechas
+        ],
         default=["people", "email", "social"]
     )
 
@@ -175,6 +195,10 @@ def show_person_search_ui():
     # ========== DARKWEB ==========
     if "darkweb" in results and results["darkweb"].get("results"):
         render_darkweb_block(results["darkweb"])
+
+    # ========== BRECHAS / LEAKS ==========
+    if "breach" in results:                      # 🔹 NUEVO: brechas
+        render_breach_block(results["breach"])
 
     # ========== DORKS ==========
     if "dorks" in results:

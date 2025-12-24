@@ -41,6 +41,12 @@ try:
 except Exception:
     google_dorks = None
 
+# 🔹 NUEVO: integración con módulo de brechas/leaks
+try:
+    from . import breach_search
+except Exception:
+    breach_search = None
+
 # 🔹 NUEVO: integración con el radar general de web (general_search)
 try:
     from . import general_search
@@ -145,6 +151,84 @@ class AdvancedSearcher:
                 }]
         except Exception as e:
             logger.exception("Web search failed")
+            out["errors"].append(str(e))
+
+        return out
+
+    # 🔹 NUEVO: búsqueda de brechas / leaks (usa breach_search.search_breaches)
+    def _search_breaches(
+        self,
+        query: str,
+        user_id: int = 1,
+        max_results: int = 25,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Wrapper del módulo de brechas para integrarlo en el esquema del coordinador.
+
+        Espera que breach_search.search_breaches devuelva algo como:
+        {
+            "source": "breach",
+            "query": str,
+            "user_id": int,
+            "timestamp": float,
+            "results": [ ... ],
+            "errors": [ ... ],
+            "has_data": bool,
+            "search_time": float,
+        }
+        """
+        out: Dict[str, Any] = {
+            "source": "breach",
+            "query": query,
+            "results": [],
+            "errors": [],
+            "has_data": False,
+        }
+
+        try:
+            if not breach_search or not hasattr(breach_search, "search_breaches"):
+                out["errors"].append("breach_search module missing")
+                return out
+
+            logger.info(
+                "[trace=%s] breach start | q=%s | max_results=%s",
+                trace_id, query, max_results
+            )
+
+            res = breach_search.search_breaches(
+                query=query,
+                user_id=user_id,
+                max_results=max_results,
+            )
+
+            # Si el módulo devuelve el dict completo, respetamos su estructura,
+            # pero normalizamos lo mínimo para el coordinador.
+            if isinstance(res, dict):
+                out["results"] = res.get("results") or []
+                # IMPORTANTE: conservamos errores del módulo de brechas
+                out["errors"].extend(res.get("errors") or [])
+                out["has_data"] = bool(res.get("has_data"))
+
+                # Opcionalmente propagamos datos útiles para logging/diagnóstico
+                if "timestamp" in res:
+                    out["timestamp"] = res["timestamp"]
+                if "search_time" in res:
+                    out["search_time"] = res["search_time"]
+            else:
+                # caso raro: el módulo no devolvió un dict
+                out["errors"].append("unexpected_result_type")
+
+            logger.info(
+                "[trace=%s] breach done | has_data=%s entries=%s time=%s",
+                trace_id,
+                out.get("has_data"),
+                len(out.get("results") or []),
+                out.get("search_time"),
+            )
+
+        except Exception as e:
+            logger.exception("Breach search failed")
             out["errors"].append(str(e))
 
         return out
@@ -364,6 +448,24 @@ class AdvancedSearcher:
                     engines,
                     total,
                     round(time.time() - t0, 3)
+                )
+
+            # 🔹 NUEVO: integración de brechas como fuente "breach"
+            if "breach" in sources:
+                t0 = time.time()
+                results["breach"] = self._search_breaches(
+                    query=query,
+                    user_id=user_id,
+                    max_results=25,   # puedes parametrizar si quieres
+                    trace_id=trace_id,
+                )
+                searched.append("breach")
+                logger.info(
+                    "[trace=%s] breach wrapper done | has_data=%s entries=%s time=%ss",
+                    trace_id,
+                    results["breach"].get("has_data"),
+                    len(results["breach"].get("results") or []),
+                    round(time.time() - t0, 3),
                 )
 
             if "dorks" in sources:

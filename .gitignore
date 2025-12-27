@@ -121,3 +121,6 @@ backups/
 *.bak
 *.old
 *.save
+/data/dorks.txt
+/quasar_users.yaml
+/codex.patch

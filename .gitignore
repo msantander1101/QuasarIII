@@ -1,0 +1,123 @@
+# ===========================================
+# 🚫 SISTEMA / ENTORNO
+# ===========================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ===========================================
+# 🔐 SEGURIDAD / CONFIGURACIONES SENSIBLES
+# ===========================================
+.env
+.env.*
+*.env.local
+*.secret
+*.secrets
+secret.key
+*.pem
+*.cert
+*.key
+
+# Tokens y claves generadas por el sistema
+api_tokens/
+api_tokens/*.txt
+
+# ===========================================
+# 🗄️ BASE DE DATOS / DATASETS / DUMPS
+# ===========================================
+# SQLite DB
+*.sqlite
+*.sqlite3
+*.db
+
+# Breach dumps o datos descargados
+data/dumps/
+data/leaks/
+data/breaches/
+data/parsed/
+
+# Cargas de dorks de usuarios
+data/dorks/
+*.dorks
+*.dorks.json
+*.dorks.txt
+
+# ===========================================
+# 📦 ARCHIVOS TEMPORALES DE RUNTIME
+# ===========================================
+tmp/
+temp/
+.cache/
+.cache/*
+logs/
+logs/*
+~$*
+*.tmp
+*.temp
+
+# ===========================================
+# 🤖 MODELOS / IA
+# ===========================================
+models/
+model_cache/
+*.bin
+*.pt
+*.onnx
+
+# ===========================================
+# 🖥️ BUILD / DEPLOY
+# ===========================================
+dist/
+build/
+site/
+*.spec
+
+# ===========================================
+# 🧪 TESTS
+# ===========================================
+.coverage
+pytest_cache/
+htmlcov/
+
+# ===========================================
+# 🧩 ENTORNOS VIRTUALES
+# ===========================================
+venv/
+env/
+ENV/
+.venv/
+.conda/
+*.conda
+
+# ===========================================
+# 🧱 STREAMLIT
+# ===========================================
+.streamlit/secrets.toml
+.streamlit/state.json
+.streamlit/credentials.toml
+
+# ===========================================
+# 🌐 FASTAPI / UVICORN
+# ===========================================
+# Si se generan logs separados
+api_logs/
+*.uvicorn.log
+
+# ===========================================
+# 🔥 EXTRA SEGURIDAD
+# ===========================================
+# Evitar subir archivos que contengan claves o datos del dominio
+config_backup/
+backup/
+backups/
+*.bak
+*.old
+*.save

@@ -5,12 +5,16 @@ from core.config_manager import config_manager
 from core.db_manager import get_user_by_id
 import logging
 
+# 🔐 NUEVO: gestión de API tokens por usuario
+from core.api_tokens import get_api_token, generate_api_token, revoke_api_token
+
 logger = logging.getLogger(__name__)
 
 
 def show_settings_page():
     """
     Página de configuración completa con gestor de API Keys
+    y token de API para /api/search
     """
 
     # Cabecera con nuevo degradado oscuro para mejorar la legibilidad del texto
@@ -40,6 +44,59 @@ def show_settings_page():
         return
 
     username = user_info[1]  # El segundo elemento es el nombre de usuario
+
+    # ======================================================
+    # 🔐 BLOQUE NUEVO: Token de API para /api/search
+    # ======================================================
+    st.markdown("### 🔐 Token de API QuasarIII (/api/search)")
+
+    st.caption(
+        "Este token permite que herramientas externas llamen a la API de QuasarIII "
+        "(`/api/search`) en tu nombre.\n\n"
+        "**Trátalo como una contraseña.** Si lo regeneras, el anterior dejará de funcionar."
+    )
+
+    api_token = get_api_token(user_id)
+
+    col_tok_1, col_tok_2 = st.columns([3, 1])
+    with col_tok_1:
+        st.text_input(
+            "Token actual",
+            value=api_token or "",
+            key="current_api_token_display",
+            help="Token asociado a tu usuario. Si está vacío, genera uno nuevo.",
+        )
+    with col_tok_2:
+        st.markdown("**Tu user_id:**")
+        st.code(str(user_id), language="text")
+        st.caption("Necesario junto con el token para usar /api/search.")
+
+    c_tok_1, c_tok_2, c_tok_3 = st.columns(3)
+    with c_tok_1:
+        if st.button("🔄 Generar / Regenerar token", key="btn_generate_token", use_container_width=True):
+            new_token = generate_api_token(user_id)
+            logger.info("API token regenerado vía UI para user_id=%s", user_id)
+            st.success("Nuevo token generado correctamente.")
+            st.info(
+                "Actualiza tus herramientas externas con el nuevo token y tu user_id. "
+                "El token anterior deja de ser válido."
+            )
+            st.rerun()
+
+    with c_tok_2:
+        if st.button("⛔ Revocar token", key="btn_revoke_token", use_container_width=True):
+            revoke_api_token(user_id)
+            logger.info("API token revocado vía UI para user_id=%s", user_id)
+            st.warning("Token revocado. Ninguna herramienta externa podrá usar la API hasta generar uno nuevo.")
+            st.rerun()
+
+    with c_tok_3:
+        if api_token:
+            st.info("Estado: Token **activo**.")
+        else:
+            st.info("Estado: No hay token activo.")
+
+    st.markdown("---")
 
     # --- Lista de API Keys disponibles ---
     st.markdown("### 🔑 Claves API Disponibles")

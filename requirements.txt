@@ -20,3 +20,5 @@ maigret
 sherlock-project
 tomli
 pyyaml
+fastapi
+pydantic

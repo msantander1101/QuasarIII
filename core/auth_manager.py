@@ -1,142 +1,168 @@
 # core/auth_manager.py
 """
-Auth Manager — control básico de usuarios y roles
+Auth Manager — control básico de usuarios y roles (SQLite)
 
 Fase 1:
 - Sin registro público desde la UI principal
 - Solo login con usuarios definidos por el administrador
-- Soporta roles básicos: admin / analyst
+- Roles básicos: admin / analyst
+- Persistencia en tabla 'users' de data/users.db
 """
 
 from __future__ import annotations
 
 import os
+import sqlite3
 import logging
 from dataclasses import dataclass
-from typing import Dict, Optional, List
+from typing import Optional, List
 
 import bcrypt
-import yaml
 
 logger = logging.getLogger(__name__)
 
-USERS_FILE = os.getenv("QUASAR_USERS_FILE", "quasar_users.yaml")
+DB_PATH = os.getenv("QUASAR_DB_PATH", "data/users.db")
 
 
 @dataclass
 class User:
+    id: int
     username: str
-    password_hash: str
+    email: str
     role: str = "analyst"
     is_active: bool = True
 
     @property
     def is_admin(self) -> bool:
-        return self.role.lower() == "admin"
+        return (self.role or "").lower() == "admin"
 
 
 class AuthManager:
-    def __init__(self, users_file: str = USERS_FILE):
-        self.users_file = users_file
-        self._users: Dict[str, User] = {}
-        self._loaded = False
+    """
+    AuthManager basado en SQLite.
 
-    # ---------------- Carga / guardado ----------------
+    Tabla users esperada (create_db + migración ligera):
+      - id INTEGER PRIMARY KEY AUTOINCREMENT
+      - username TEXT UNIQUE NOT NULL
+      - email TEXT UNIQUE NOT NULL
+      - password_hash BLOB NOT NULL
+      - created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      - role TEXT DEFAULT 'analyst'
+      - is_active INTEGER DEFAULT 1
+    """
 
-    def _load(self) -> None:
-        if self._loaded:
-            return
+    def __init__(self, db_path: str = DB_PATH):
+        self.db_path = db_path
+        self._ensure_schema()
 
-        if not os.path.exists(self.users_file):
-            logger.warning("Users file not found: %s", self.users_file)
-            self._users = {}
-            self._loaded = True
-            return
+    # ---------------- Esquema / migración ligera ----------------
 
+    def _ensure_schema(self) -> None:
+        """
+        Asegura que la tabla 'users' exista y tenga columnas role e is_active.
+        No revienta si ya existen (se ignoran los errores de ALTER TABLE).
+        """
         try:
-            with open(self.users_file, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-        except Exception as e:
-            logger.error("Error loading users file: %s", e)
-            self._users = {}
-            self._loaded = True
-            return
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
 
-        users: Dict[str, User] = {}
-        for entry in data.get("users", []):
+            # Crear tabla base si no existe (por si create_db aún no se ha ejecutado)
+            c.execute(
+                """CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
+                    password_hash BLOB NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+
+            # Añadir columnas role / is_active si no existen
             try:
-                u = User(
-                    username=str(entry.get("username")).strip(),
-                    password_hash=str(entry.get("password_hash")).strip(),
-                    role=(entry.get("role") or "analyst").strip(),
-                    is_active=bool(entry.get("is_active", True)),
-                )
-                if u.username:
-                    users[u.username.lower()] = u
-            except Exception as e:
-                logger.error("Invalid user entry in users file: %s", e)
+                c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'analyst'")
+            except sqlite3.OperationalError:
+                # Columna ya existe
+                pass
 
-        self._users = users
-        self._loaded = True
-        logger.info("AuthManager loaded %s users", len(self._users))
+            try:
+                c.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1")
+            except sqlite3.OperationalError:
+                # Columna ya existe
+                pass
 
-    def _save(self) -> None:
-        data = {
-            "users": [
-                {
-                    "username": u.username,
-                    "password_hash": u.password_hash,
-                    "role": u.role,
-                    "is_active": u.is_active,
-                }
-                for u in self._users.values()
-            ]
-        }
-        os.makedirs(os.path.dirname(self.users_file) or ".", exist_ok=True)
-        with open(self.users_file, "w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, allow_unicode=True)
-        logger.info("AuthManager saved users file: %s", self.users_file)
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error("Error asegurando esquema de la tabla users: %s", e)
 
-    # ---------------- Password helpers ----------------
+    # ---------------- Helpers de password ----------------
 
     @staticmethod
-    def hash_password(password: str) -> str:
-        pw = password.encode("utf-8")
-        hashed = bcrypt.hashpw(pw, bcrypt.gensalt())
-        return hashed.decode("utf-8")
+    def hash_password(password: str) -> bytes:
+        return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
 
     @staticmethod
-    def verify_password(password: str, password_hash: str) -> bool:
+    def verify_password(password: str, password_hash: bytes) -> bool:
         try:
-            pw = password.encode("utf-8")
-            ph = password_hash.encode("utf-8")
-            return bcrypt.checkpw(pw, ph)
+            return bcrypt.checkpw(password.encode("utf-8"), password_hash)
         except Exception:
             return False
 
-    # ---------------- API pública ----------------
+    # ---------------- Internos ----------------
 
-    def get_user(self, username: str) -> Optional[User]:
-        self._load()
-        return self._users.get((username or "").strip().lower())
+    def _row_to_user(self, row) -> User:
+        """
+        row: (id, username, email, password_hash, created_at, role, is_active)
+        """
+        return User(
+            id=row[0],
+            username=row[1],
+            email=row[2],
+            role=row[5] if len(row) > 5 and row[5] is not None else "analyst",
+            is_active=bool(row[6]) if len(row) > 6 else True,
+        )
+
+    # ---------------- API pública ----------------
 
     def authenticate(self, username: str, password: str) -> Optional[User]:
         """
-        Devuelve el User si las credenciales son válidas y el usuario está activo,
+        Devuelve User si las credenciales son válidas y el usuario está activo,
         o None en caso contrario.
         """
-        self._load()
         uname = (username or "").strip().lower()
-        user = self._users.get(uname)
-        if not user:
+        if not uname or not password:
+            return None
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            c.execute(
+                "SELECT id, username, email, password_hash, created_at, "
+                "COALESCE(role, 'analyst') as role, "
+                "COALESCE(is_active, 1) as is_active "
+                "FROM users WHERE LOWER(username)=?",
+                (uname,),
+            )
+            row = c.fetchone()
+            conn.close()
+        except Exception as e:
+            logger.error("Error autenticando usuario %s: %s", uname, e)
+            return None
+
+        if not row:
             logger.warning("Auth failed: user not found (%s)", uname)
             return None
+
+        pw_hash = row[3]
+        if not self.verify_password(password, pw_hash):
+            logger.warning("Auth failed: bad password (%s)", uname)
+            return None
+
+        user = self._row_to_user(row)
         if not user.is_active:
             logger.warning("Auth failed: user inactive (%s)", uname)
             return None
-        if not self.verify_password(password, user.password_hash):
-            logger.warning("Auth failed: bad password (%s)", uname)
-            return None
+
         return user
 
     def create_user(
@@ -145,55 +171,110 @@ class AuthManager:
         password: str,
         role: str = "analyst",
         is_active: bool = True,
+        email: Optional[str] = None,
     ) -> User:
         """
         Crear usuario nuevo (se usa desde CLI y desde el panel admin).
+        Persiste en tabla 'users'.
         """
-        self._load()
         uname = (username or "").strip().lower()
         if not uname:
             raise ValueError("username vacío")
-        if uname in self._users:
-            raise ValueError(f"El usuario '{uname}' ya existe")
 
+        email_val = (email or f"{uname}@local").strip()
         pw_hash = self.hash_password(password)
-        user = User(username=uname, password_hash=pw_hash, role=role, is_active=is_active)
-        self._users[uname] = user
-        self._save()
-        logger.info("User created: %s (role=%s)", uname, role)
-        return user
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            c.execute(
+                "INSERT INTO users (username, email, password_hash, role, is_active) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (uname, email_val, pw_hash, role, 1 if is_active else 0),
+            )
+            user_id = c.lastrowid
+            conn.commit()
+            conn.close()
+            logger.info(
+                "User created: %s (id=%s, role=%s, email=%s)",
+                uname, user_id, role, email_val
+            )
+        except sqlite3.IntegrityError as e:
+            logger.error("User/email already exists: %s", e)
+            raise ValueError(f"El usuario o email ya existen: {uname}") from e
+        except Exception as e:
+            logger.error("Error creando usuario %s: %s", uname, e)
+            raise
+
+        return User(
+            id=user_id,
+            username=uname,
+            email=email_val,
+            role=role,
+            is_active=is_active,
+        )
 
     def list_users(self) -> List[User]:
-        self._load()
-        return list(self._users.values())
+        """
+        Devuelve todos los usuarios registrados.
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            c.execute(
+                "SELECT id, username, email, password_hash, created_at, "
+                "COALESCE(role, 'analyst') as role, "
+                "COALESCE(is_active, 1) as is_active "
+                "FROM users ORDER BY created_at ASC"
+            )
+            rows = c.fetchall()
+            conn.close()
+        except Exception as e:
+            logger.error("Error listando usuarios: %s", e)
+            return []
+
+        return [self._row_to_user(r) for r in rows]
 
     # ---------------- Gestión por administrador ----------------
 
     def set_user_active(self, username: str, is_active: bool) -> None:
-        """Activa / desactiva un usuario existente."""
-        self._load()
+        """
+        Activa / desactiva un usuario existente.
+        """
         uname = (username or "").strip().lower()
-        user = self._users.get(uname)
-        if not user:
-            raise ValueError(f"Usuario '{uname}' no encontrado")
-
-        user.is_active = bool(is_active)
-        self._users[uname] = user
-        self._save()
-        logger.info("User %s set is_active=%s", uname, is_active)
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            c.execute(
+                "UPDATE users SET is_active=? WHERE LOWER(username)=?",
+                (1 if is_active else 0, uname),
+            )
+            conn.commit()
+            conn.close()
+            logger.info("User %s set is_active=%s", uname, is_active)
+        except Exception as e:
+            logger.error("Error cambiando estado de usuario %s: %s", uname, e)
+            raise
 
     def set_user_role(self, username: str, role: str) -> None:
-        """Cambia el rol de un usuario (p.ej. analyst → admin)."""
-        self._load()
+        """
+        Cambia el rol de un usuario (p.ej. analyst → admin).
+        """
         uname = (username or "").strip().lower()
-        user = self._users.get(uname)
-        if not user:
-            raise ValueError(f"Usuario '{uname}' no encontrado")
-
-        user.role = (role or "analyst").strip()
-        self._users[uname] = user
-        self._save()
-        logger.info("User %s role changed to %s", uname, role)
+        new_role = (role or "analyst").strip()
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            c.execute(
+                "UPDATE users SET role=? WHERE LOWER(username)=?",
+                (new_role, uname),
+            )
+            conn.commit()
+            conn.close()
+            logger.info("User %s role changed to %s", uname, new_role)
+        except Exception as e:
+            logger.error("Error cambiando rol de usuario %s: %s", uname, e)
+            raise
 
 
 # Instancia global

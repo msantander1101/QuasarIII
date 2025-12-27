@@ -1,54 +1,152 @@
-# Quasar III OSINT Suite
+# 🧠 QuasarIII — OSINT & Corporate Intelligence Suite
 
-Quasar III es una suite OSINT moderna basada en Streamlit que centraliza autenticación, búsquedas avanzadas, visualización de grafos, generación de reportes y análisis asistido con IA en una sola aplicación web. El núcleo usa SQLite para persistencia, registra eventos en `logs/app.log` y permite almacenar claves API por usuario para integraciones externas.
+**QuasarIII** es una plataforma modular de OSINT e inteligencia diseñada para uso corporativo.  
+Incluye autenticación con control de acceso, módulos de recopilación pasiva, análisis contextual, visualización profesional para analistas y arquitectura preparada para integrarse con plataformas CTI como **OpenCTI**.
 
-## Características principales
-- **Inicio rápido en Streamlit** con creación automática de base de datos y configuración de logger para registrar la actividad de la aplicación. `app.py` levanta la interfaz `ui/main.py` y asegura que las tablas existan antes de servir la UI.【F:app.py†L1-L18】【F:core/db_manager.py†L9-L85】
-- **Autenticación y configuración por usuario** con almacenamiento seguro de hashes de contraseñas y claves de configuración (por ejemplo, tokens de API) en SQLite.【F:core/db_manager.py†L22-L77】【F:core/config_manager.py†L12-L60】
-- **Routing de la interfaz** a páginas de login/registro, dashboard, búsquedas de personas, visualización de grafos, configuración y generación de reportes, todo orquestado desde Streamlit usando `session_state`.【F:ui/main.py†L1-L122】
-- **Módulo de IA** para resúmenes, clasificación y detección de datos sensibles usando OpenAI y LangChain cuando se proporcionan las API keys correspondientes.【F:modules/ai/intelligence_core.py†L1-L196】
-- **Persistencia de investigaciones** (personas, relaciones y datos de análisis) con funciones CRUD listas para ser reutilizadas por los módulos de búsqueda y visualización.【F:core/db_manager.py†L87-L200】
-- **Logging centralizado** en consola y archivo `logs/app.log` con protección contra handlers duplicados en recargas de Streamlit.【F:utils/logger.py†L7-L40】
+Actualmente operando en **Fase 1 — Hardening interno**, con login obligatorio y administración centralizada de usuarios.
 
-## Requisitos
-- Python 3.10 o superior recomendado.
-- Dependencias listadas en `requirements.txt`, que incluye Streamlit, NetworkX, OpenAI, LangChain y bibliotecas de scraping/OSINT como Sherlock y Maigret.【F:requirements.txt†L1-L21】
+---
 
-## Instalación
-1. Clona este repositorio y entra en la carpeta del proyecto.
-2. (Opcional) Crea y activa un entorno virtual:
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # En Windows: .venv\\Scripts\\activate
-   ```
-3. Instala las dependencias:
-   ```bash
-   pip install -r requirements.txt
-   ```
+## 🚀 Características principales
 
-## Ejecución
-- Inicia la aplicación con:
-  ```bash
-  python app.py
-  ```
-  Este comando crea `data/users.db` con las tablas necesarias y arranca Streamlit apuntando a `ui/main.py`. También puedes ejecutar directamente `streamlit run ui/main.py` si prefieres usar la CLI de Streamlit.【F:app.py†L10-L18】
-- Los registros se guardan en `logs/app.log`. Asegúrate de que el directorio tenga permisos de escritura.【F:utils/logger.py†L7-L40】
+| Módulo / Funcionalidad | Estado | Descripción |
+|------------------------|--------|--------------|
+| 🔐 Autenticación segura | ✔ Activo | Acceso con cuentas internas, sin registro público |
+| 👑 Panel Admin | ✔ Activo | Crear, activar, desactivar usuarios y cambiar roles |
+| 🔎 OSINT Pasivo Web | ✔ Activo | Radar contextual Google/Bing/DDG con resultados normalizados |
+| 🕵️ Google Dorks | ✔ Activo | Motor de dorks con scoring, cards y relevancia |
+| 🧬 Breach Intelligence Interno | ⚙ Parcial | Ingesta interna de dumps, análisis sensible y scoring de exposición |
+| 🔄 OpenCTI Integration | 📅 Fase 3 | Preparado para API / conectores de enriquecimiento e ingestión STIX2 |
+| 🧱 Permission Layer | 📅 Fase 2 | Control por rol de módulos sensibles (darkweb, breach, etc.) |
 
-## Uso rápido
-1. **Registro / Login:** Crea una cuenta desde la pestaña de registro y autentícate para acceder al panel.【F:ui/pages/login.py†L10-L75】
-2. **Dashboard:** Usa los accesos rápidos para ir a búsquedas avanzadas, visualizar grafos o generar reportes.【F:ui/pages/dashboard.py†L14-L93】
-3. **Búsquedas y análisis:** Añade personas investigadas, relaciones y datos OSINT; las entradas quedan persistidas en SQLite para su reutilización.【F:core/db_manager.py†L87-L200】
-4. **Configuración y claves API:** En la página de ajustes guarda claves como `openai_api_key` o credenciales para redes sociales; se almacenan por usuario y pueden ser consultadas desde los módulos correspondientes.【F:core/config_manager.py†L12-L89】【F:modules/search/config.py†L10-L45】
-5. **Funciones de IA:** Si defines `openai_api_key`, el módulo de IA se inicializa al iniciar sesión y habilita resúmenes, clasificación y detección de datos sensibles dentro de los flujos de análisis.【F:ui/main.py†L75-L83】【F:modules/ai/intelligence_core.py†L36-L196】
+---
 
-## Estructura del proyecto
-- `app.py`: punto de entrada que inicializa la base de datos y arranca la UI de Streamlit.【F:app.py†L1-L18】
-- `core/`: servicios base (DB, autenticación, gestión de configuraciones).【F:core/db_manager.py†L9-L200】【F:core/config_manager.py†L12-L89】
-- `modules/`: funcionalidades de dominio (IA, búsqueda OSINT, reportes).【F:modules/ai/intelligence_core.py†L1-L196】
-- `ui/`: interfaz Streamlit con páginas para login, dashboard, búsqueda, grafos, ajustes y reportes.【F:ui/main.py†L18-L122】
-- `utils/`: utilidades compartidas como el sistema de logging.【F:utils/logger.py†L7-L40】
+## 📦 Instalación
 
-## Notas de desarrollo
-- La base de datos SQLite se crea automáticamente en `data/users.db`; elimina el archivo para reiniciar los datos en entornos de prueba.【F:core/db_manager.py†L9-L85】
-- Si añades nuevas integraciones que requieran claves API, usa `ConfigManager` para guardarlas y listarlas de forma consistente.【F:core/config_manager.py†L12-L89】
-- El módulo de IA se mantiene deshabilitado hasta que se proporcione una clave válida; maneja el estado vía `initialize_ai_analyzer` en `ui/main.py`.【F:ui/main.py†L75-L83】
+```bash
+git clone https://github.com/msantander1101/QuasarIII.git
+cd QuasarIII
+python -m venv .venv
+source .venv/bin/activate         # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+▶️ Ejecución
+
+python app.py
+
+o:
+
+streamlit run app.py
+
+🔐 Gestión de usuarios (Hardening Fase 1)
+Crear el usuario administrador inicial
+
+python -m core.create_admin_user
+
+Funcionamiento
+
+    ❌ No hay registro público.
+
+    ✔ Solo el administrador puede crear cuentas nuevas.
+
+    ✔ Roles disponibles: admin, analyst.
+
+    ✔ Panel de administración desde la UI solo visible para admin.
+
+🧭 Flujo del sistema
+
+    Usuario accede → pantalla de login.
+
+    Si es analista, accede a los módulos OSINT.
+
+    Si es admin, además puede:
+
+        Crear usuarios
+
+        Cambiar roles
+
+        Activar/desactivar cuentas
+
+📁 Estructura del proyecto
+
+QuasarIII/
+├── app.py                          # Entrada principal
+├── core/
+│   ├── auth_manager.py             # Autenticación y roles
+│   ├── config_manager.py           # Configuración por usuario y API keys
+│   ├── db_manager.py               # Persistencia con SQLite
+├── modules/
+│   ├── search/                     # Web, dorks, general, correlación
+│   ├── ai/                         # Inteligencia artificial / NLP
+│   └── breach/                     # Breach pipeline defensivo
+├── ui/
+│   ├── auth/                       # Login + Panel administrador
+│   ├── pages/                      # Secciones principales de la interfaz
+│   └── components/                 # Bloques visuales reutilizables
+├── utils/                          # Helpers, logging, formatos
+├── data/                           # Base de datos interna
+└── logs/                           # Logs de ejecución
+
+🧠 Preparado para Integración con OpenCTI (Fase 3)
+
+Ya está contemplada la arquitectura para:
+
+    Conector de enriquecimiento (OpenCTI → QuasarIII)
+
+    Envío de hallazgos como STIX2 (QuasarIII → OpenCTI)
+
+    API /api/search para consumo desde plataforma CTI
+
+    Mapeo automático → Identity / ObservedData / Indicator / Relationships
+
+    Esta fase está planificada sin alterar tu estructura actual.
+
+📅 Roadmap
+Fase	Objetivo	Estado
+Fase 1	Hardening, login, panel admin, sin registro	🟢 Lista
+Fase 2	PermissionManager y control de módulos por rol	🟡 Próxima
+Fase 3	API externa + Conector OpenCTI STIX2	🔵 Diseño
+Fase 4	IA, correlación avanzada, Data Lake OSINT	🟣 Largo plazo
+🧾 CHANGELOG
+v0.3.0 — Hardening
+
+    Se elimina registro público
+
+    Login obligatorio
+
+    Panel admin de usuarios
+
+    Breach pipeline básico
+
+    Normalización de resultados OSINT
+
+v0.2.0 — OSINT UI
+
+    Módulos web/dorks
+
+    Cards con scoring y relevancia
+
+    Unificación visual
+
+v0.1.0 — MVP
+
+    Primera UI
+
+    Búsqueda web básica
+
+🤝 Contribuir
+
+    Crear rama: feature/nueva-fuente o fix/xxxx
+
+    Mantener formato de resultados OSINT compatible con advanced_search
+
+    Asegurar coherencia con UI (cards / snippets / scoring)
+
+📞 Contacto
+
+Autor: msantander1101
+Proyecto corporativo — OSINT / CTI / Inteligencia aplicada
+🛡 Nota Legal
+
+Este software está orientado a investigación defensiva y corporativa.
+Su uso para actividades ofensivas o ilegales queda fuera del alcance del proyecto.

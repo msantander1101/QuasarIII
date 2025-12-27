@@ -178,3 +178,4 @@ data/
 # Parches
 *.patch
 *.diff
+/quasar_users.yaml

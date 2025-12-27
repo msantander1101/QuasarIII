@@ -14,9 +14,6 @@ def show_dashboard():
     Dashboard completamente sin barra lateral
     """
     # Header moderno con logo y título
-    # Cabecera con nuevo esquema de colores.  Hemos sustituido el degradado
-    # anterior por un degradado más oscuro (azules profundos) que mejora el
-    # contraste con el texto blanco y ofrece un aspecto SaaS profesional.
     st.markdown("""
         <div style="background: linear-gradient(135deg, #3a7bd5 0%, #004e92 100%); 
                     padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
@@ -30,7 +27,10 @@ def show_dashboard():
     """, unsafe_allow_html=True)
 
     # Mostrar información del usuario
-    username = st.session_state.get('current_user', {}).get('username', 'Usuario Desconocido')
+    current_user = st.session_state.get('current_user', {}) or {}
+    username = current_user.get('username', 'Usuario Desconocido')
+    is_admin = current_user.get('is_admin', False)
+
     st.markdown(f"""
         <div style="display: flex; justify-content: space-between; align-items: center; 
                    background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
@@ -54,28 +54,37 @@ def show_dashboard():
                      key="btn_search", help="Buscar personas, emails, información"):
             st.session_state['page'] = 'person_search'
             st.session_state['force_reload'] = True
-            st.rerun()  # Cambiado de experimental_rerun a rerun
+            st.rerun()
 
     with cols[1]:
         if st.button("🧠 Visualizar Grafo", use_container_width=True,
                      key="btn_graph", help="Ver relaciones y conexiones"):
             st.session_state['page'] = 'graph_visualization'
             st.session_state['force_reload'] = True
-            st.rerun()  # Cambiado de experimental_rerun a rerun
+            st.rerun()
 
     with cols[2]:
         if st.button("⚙️ Configuración", use_container_width=True,
                      key="btn_config", help="Administrar claves API y configuración"):
             st.session_state['page'] = 'settings'
             st.session_state['force_reload'] = True
-            st.rerun()  # Cambiado de experimental_rerun a rerun
+            st.rerun()
 
     with cols[3]:
         if st.button("📄 Reportes", use_container_width=True,
                      key="btn_reports", help="Generar informes profesionales"):
             st.session_state['page'] = 'report_generation'
             st.session_state['force_reload'] = True
-            st.rerun()  # Cambiado de experimental_rerun a rerun
+            st.rerun()
+
+    # Botón extra solo para administradores
+    if is_admin:
+        st.markdown("")
+        if st.button("👑 Administración de Usuarios", use_container_width=True,
+                     key="btn_admin_users", help="Gestionar cuentas y roles de usuario"):
+            st.session_state['page'] = 'admin_users'
+            st.session_state['force_reload'] = True
+            st.rerun()
 
     # Tarjetas de información crítica
     st.markdown("### 📊 Estadísticas del Sistema")
@@ -87,7 +96,8 @@ def show_dashboard():
     with cols_stats[0]:
         # Estadísticas de personas
         if user_id:
-            persons_count = len(get_persons_by_user(user_id))
+            persons = get_persons_by_user(user_id)
+            persons_count = len(persons)
         else:
             persons_count = 0
 
@@ -137,14 +147,13 @@ def show_dashboard():
                 """
                 st.markdown(person_card, unsafe_allow_html=True)
         else:
-            st.info(" aún no has realizado búsquedas. Comienza con una búsqueda avanzada.")
+            st.info("Aún no has realizado búsquedas. Comienza con una búsqueda avanzada.")
     else:
         st.warning("Accede al sistema para ver tus búsquedas.")
 
-    # Panel de información de seguridad (CORREGIDO)
+    # Panel de información de seguridad
     st.markdown("### 🔐 Seguridad y Privacidad")
 
-    # CORRECCIÓN DEL ERROR - Mostrar HTML con markdown, no con info
     st.markdown("""
         <div style="padding: 15px; border-radius: 8px; background-color: #e7f3ff;">
             <h4>🔐 Tu Seguridad Es Prioridad</h4>
@@ -165,4 +174,4 @@ def show_dashboard():
         if st.button("🔒 Cerrar Sesión", use_container_width=True,
                      key="btn_logout", help="Salir del sistema de forma segura"):
             st.session_state.clear()
-            st.rerun()  # Cambiado de experimental_rerun a rerun()
+            st.rerun()

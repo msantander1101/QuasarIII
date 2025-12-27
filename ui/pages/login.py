@@ -2,7 +2,7 @@
 
 import logging
 import streamlit as st
-from core.auth_manager import authenticate_user, register_user
+from core.auth_manager import auth_manager, User
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +159,6 @@ div[data-testid="stButton"] button:hover {
   margin: 4px 0 10px 0;
 }
 
-/* Make the whole middle column feel like one card */
 .q3-divider {
   height: 1px;
   background: rgba(255,255,255,0.10);
@@ -171,14 +170,12 @@ div[data-testid="stButton"] button:hover {
     )
 
 
-def show_login_with_tabs():
+def show_login_with_tabs() -> User | None:
     _inject_login_styles()
 
-    # ✅ Centro real con columnas (no dependemos de wrappers HTML abiertos)
     left, mid, right = st.columns([1, 2, 1], vertical_alignment="top")
 
     with mid:
-        # Card start (header)
         st.markdown(
             """
 <div class="q3-card">
@@ -202,12 +199,13 @@ def show_login_with_tabs():
             unsafe_allow_html=True,
         )
 
-        tab1, tab2 = st.tabs(["🔐 Iniciar sesión", "🆕 Registro"])
+        tab1, tab2 = st.tabs(["🔐 Iniciar sesión", "🛑 Registro deshabilitado"])
 
+        # ---------- TAB LOGIN ----------
         with tab1:
             st.markdown(
                 '<div class="q3-help">Introduce tus credenciales para acceder al panel.</div>',
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
 
             username = st.text_input(
@@ -226,75 +224,51 @@ def show_login_with_tabs():
             )
 
             if st.button("Entrar", use_container_width=True, key="login_submit"):
-                if username and password:
-                    user_id = authenticate_user(username, password)
-                    if user_id:
+                if not username or not password:
+                    st.warning("⚠️ Completa usuario y contraseña.")
+                else:
+                    user = auth_manager.authenticate(username, password)
+                    if user:
+                        # Estado de sesión compatible con ui/main.py y admin_users.py
                         st.session_state["authenticated"] = True
-                        st.session_state["current_user_id"] = user_id
-                        st.session_state["current_user"] = {"username": username}
-                        logger.info("Login OK | user=%s id=%s", username, user_id)
+                        st.session_state["current_user"] = {
+                            "username": user.username,
+                            "role": user.role,
+                            "is_admin": user.is_admin,
+                        }
+                        # main.py espera current_user_id para config_manager / IA:
+                        st.session_state["current_user_id"] = user.username
+                        # Página por defecto tras login
+                        st.session_state["page"] = "dashboard"
+
+                        logger.info(
+                            "Login OK | user=%s role=%s admin=%s",
+                            user.username,
+                            user.role,
+                            user.is_admin,
+                        )
                         st.success("✅ Acceso autorizado.")
                         st.rerun()
                     else:
-                        st.error("❌ Usuario o contraseña incorrectos.")
+                        st.error("❌ Credenciales incorrectas o usuario inactivo.")
                         logger.warning("Login FAIL | user=%s", username)
-                else:
-                    st.warning("⚠️ Completa usuario y contraseña.")
 
+        # ---------- TAB REGISTRO (DESHABILITADO) ----------
         with tab2:
             st.markdown(
-                '<div class="q3-help">Crea tu cuenta para empezar a operar.</div>',
-                unsafe_allow_html=True
+                """
+<div class="q3-help">
+  El registro público está <b>deshabilitado</b> en esta instancia de Quasar III.<br>
+  Solicita el alta de una cuenta a tu administrador de la plataforma.
+</div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.info(
+                "👤 Las cuentas se crean mediante el script de administración "
+                "(`create_admin_user`) o el panel de administración de usuarios."
             )
 
-            new_username = st.text_input(
-                "Nombre de Usuario",
-                key="register_username",
-                placeholder="Nombre de usuario",
-                label_visibility="collapsed",
-            )
-
-            new_email = st.text_input(
-                "Correo Electrónico",
-                key="register_email",
-                placeholder="tu@email.com",
-                label_visibility="collapsed",
-            )
-
-            new_password = st.text_input(
-                "Contraseña",
-                type="password",
-                key="register_password",
-                placeholder="Contraseña segura",
-                label_visibility="collapsed",
-            )
-
-            confirm_password = st.text_input(
-                "Confirmar Contraseña",
-                type="password",
-                key="confirm_password",
-                placeholder="Repite la contraseña",
-                label_visibility="collapsed",
-            )
-
-            if st.button("Crear cuenta", use_container_width=True, key="register_submit"):
-                if new_username and new_email and new_password and confirm_password:
-                    if new_password != confirm_password:
-                        st.error("❌ Las contraseñas no coinciden.")
-                        return
-
-                    success = register_user(new_username, new_email, new_password)
-                    if success:
-                        st.success("✅ Registro completado. Ya puedes iniciar sesión.")
-                        logger.info("Register OK | user=%s", new_username)
-                        st.rerun()
-                    else:
-                        st.error("❌ Usuario o email ya existentes.")
-                        logger.warning("Register FAIL | user=%s", new_username)
-                else:
-                    st.warning("⚠️ Completa todos los campos.")
-
-        # Card end (footer + close divs)
         st.markdown(
             """
   </div>
@@ -306,3 +280,15 @@ def show_login_with_tabs():
             """,
             unsafe_allow_html=True,
         )
+
+    # Si ya hay usuario autenticado, devolvemos un User reconstruido (opcional)
+    info = st.session_state.get("current_user")
+    if info and st.session_state.get("authenticated"):
+        return User(
+            username=info["username"],
+            password_hash="",
+            role=info.get("role", "analyst"),
+            is_active=True,
+        )
+
+    return None

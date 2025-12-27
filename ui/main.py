@@ -1,3 +1,5 @@
+# ui/main.py
+
 import streamlit as st
 import os
 import sys
@@ -24,11 +26,12 @@ from ui.pages.person_search import show_person_search_ui
 from ui.pages.graph_visualization import show_graph_visualization
 from ui.pages.settings import show_settings_page
 from ui.pages.report_generation import show_report_generation_page
+from ui.pages.admin_users import show_admin_users_page  # ⬅️ añadido
 
 # -------------------------------------------------
 # Utils
 # -------------------------------------------------
-from ui.utils.helpers import clear_session
+from ui.utils.helpers import clear_session  # si lo usas en otros sitios
 from utils.logger import setup_logger
 
 logger = setup_logger()
@@ -67,6 +70,7 @@ def main():
         "search_count": 0,
         "current_timestamp": None,
         "active_tab": "login",
+        "force_reload": False,     # ⬅️ añadido para coherencia con dashboard
     }
 
     for k, v in defaults.items():
@@ -100,7 +104,12 @@ def main():
     # -------------------------------------------------
     if st.session_state["authenticated"]:
         page = st.session_state.get("page", "dashboard")
-        logger.info(f"Sesión activa | Página: {page}")
+        current_user = st.session_state.get("current_user", {})
+        logger.info(
+            "Sesión activa | Usuario=%s | Página=%s",
+            current_user.get("username"),
+            page,
+        )
 
         if page == "person_search":
             show_person_search_ui()
@@ -113,6 +122,10 @@ def main():
 
         elif page == "report_generation":
             show_report_generation_page()
+
+        elif page == "admin_users":
+            # El propio módulo hace el check de is_admin
+            show_admin_users_page()
 
         else:
             show_dashboard()

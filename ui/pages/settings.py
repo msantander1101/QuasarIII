@@ -39,11 +39,13 @@ def show_settings_page():
 
     # Verificar si el usuario ha sido autenticado y recuperado correctamente (más seguridad)
     user_info = get_user_by_id(user_id)
-    if not user_info:
-        st.error("No se pudieron obtener los datos del usuario.")
-        return
+    current_user = st.session_state.get("current_user") or {}
 
-    username = user_info[1]  # El segundo elemento es el nombre de usuario
+    if user_info:
+        username = user_info[1]  # id, username, email
+    else:
+        # Fallback a la sesión, no bloqueamos toda la página por esto
+        username = current_user.get("username") or f"user_{user_id}"
 
     # ======================================================
     # 🔐 BLOQUE NUEVO: Token de API para /api/search

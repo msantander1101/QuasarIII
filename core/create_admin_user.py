@@ -1,14 +1,13 @@
 # core/create_admin_user.py
 
 from getpass import getpass
-
 from core.auth_manager import auth_manager
 
 
 def main():
     print("== Crear usuario administrador para QuasarIII (SQLite) ==")
     username = input("Usuario (por ejemplo 'miguel' o 'admin'): ").strip() or "admin"
-    email = input("Email (por ejemplo 'tuusuario@tuempresa.com'): ").strip() or f"{username}@local"
+    email = input("Email (por ejemplo 'usuario@empresa.com'): ").strip() or f"{username}@local"
 
     password = getpass("Contraseña: ")
     password2 = getpass("Repite la contraseña: ")

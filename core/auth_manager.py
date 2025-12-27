@@ -41,7 +41,7 @@ class AuthManager:
     """
     AuthManager basado en SQLite.
 
-    Tabla users esperada (create_db + migración ligera):
+    Tabla users esperada:
       - id INTEGER PRIMARY KEY AUTOINCREMENT
       - username TEXT UNIQUE NOT NULL
       - email TEXT UNIQUE NOT NULL
@@ -60,7 +60,6 @@ class AuthManager:
     def _ensure_schema(self) -> None:
         """
         Asegura que la tabla 'users' exista y tenga columnas role e is_active.
-        No revienta si ya existen (se ignoran los errores de ALTER TABLE).
         """
         try:
             conn = sqlite3.connect(self.db_path)
@@ -81,13 +80,11 @@ class AuthManager:
             try:
                 c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'analyst'")
             except sqlite3.OperationalError:
-                # Columna ya existe
                 pass
 
             try:
                 c.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1")
             except sqlite3.OperationalError:
-                # Columna ya existe
                 pass
 
             conn.commit()

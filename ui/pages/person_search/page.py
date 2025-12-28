@@ -280,5 +280,12 @@ def show_person_search_ui():
         f"Fuentes: {', '.join(meta.get('sources_searched', []))}"
     )
 
+    # ------------------ VOLVER ------------------
+    st.markdown("---")
+    if st.button("← Volver", use_container_width=True):
+        # Puedes cambiar 'dashboard' por 'person_search' si prefieres
+        st.session_state["page"] = "dashboard"
+        st.rerun()
+
 
 __all__ = ["show_person_search_ui"]

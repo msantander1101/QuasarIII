@@ -27,6 +27,7 @@ from ui.pages.graph_visualization import show_graph_visualization
 from ui.pages.settings import show_settings_page
 from ui.pages.report_generation import show_report_generation_page
 from ui.pages.admin_users import show_admin_users_page  # ⬅️ añadido
+from ui.pages.investigations import show_investigations_page  # ⬅️ añadido
 
 # -------------------------------------------------
 # Utils
@@ -126,6 +127,9 @@ def main():
         elif page == "admin_users":
             # El propio módulo hace el check de is_admin
             show_admin_users_page()
+
+        elif page == "investigations":  # ⬅️ NUEVO: página Investigaciones
+            show_investigations_page()
 
         else:
             show_dashboard()

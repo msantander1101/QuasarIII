@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import logging
+import json
 
 # Configurar logger
 logger = logging.getLogger(__name__)
@@ -73,6 +74,27 @@ def create_db(db_path: str = 'data/users.db'):
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (user_id) REFERENCES users (id),
                         UNIQUE(user_id, config_key)
+                    )''')
+        # Tabla de INVESTIGACIONES (búsquedas agrupadas en una entidad)
+        c.execute('''CREATE TABLE IF NOT EXISTS investigations (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        root_query TEXT NOT NULL,
+                        entity_type TEXT,              -- p.ej. person, email, domain, username
+                        label TEXT,                    -- nombre amigable para la investigación
+                        notes TEXT,                    -- notas libres del analista
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users (id)
+                    )''')
+
+        # Resultados asociados a una investigación (snapshot en JSON)
+        c.execute('''CREATE TABLE IF NOT EXISTS investigation_results (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        investigation_id INTEGER NOT NULL,
+                        source TEXT NOT NULL,          -- p.ej. combined, people, email, web, dorks...
+                        result_json TEXT NOT NULL,     -- JSON completo con resultados
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (investigation_id) REFERENCES investigations (id)
                     )''')
 
         conn.commit()
@@ -385,4 +407,169 @@ def get_user_by_id(user_id: int, db_path: str = 'data/users.db'):
         return user
     except Exception as e:
         logger.error(f"Error obteniendo usuario por ID: {e}")
+        return None
+
+# --- FUNCIONES PARA INVESTIGACIONES / CASOS ---
+
+def create_investigation(
+    user_id: int,
+    root_query: str,
+    entity_type: str = None,
+    label: str = None,
+    notes: str = "",
+    db_path: str = 'data/users.db',
+) -> int:
+    """
+    Crea una nueva 'investigación' asociada a una búsqueda.
+
+    Devuelve el ID de la investigación creada.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        c.execute(
+            """INSERT INTO investigations (user_id, root_query, entity_type, label, notes)
+               VALUES (?, ?, ?, ?, ?)""",
+            (user_id, root_query, entity_type, label, notes),
+        )
+        inv_id = c.lastrowid
+        conn.commit()
+        conn.close()
+        logger.info(
+            "Investigación creada: id=%s user_id=%s root_query=%s",
+            inv_id, user_id, root_query
+        )
+        return inv_id
+    except Exception as e:
+        logger.error(f"Error creando investigación: {e}")
+        return None
+
+
+def save_investigation_results(
+    investigation_id: int,
+    results: dict,
+    source: str = "combined",
+    db_path: str = 'data/users.db',
+) -> bool:
+    """
+    Guarda un snapshot JSON de los resultados asociados a una investigación.
+
+    Por defecto guarda todo el dict 'results' bajo el source 'combined'.
+    """
+    try:
+        payload = json.dumps(results, ensure_ascii=False)
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        c.execute(
+            """INSERT INTO investigation_results (investigation_id, source, result_json)
+               VALUES (?, ?, ?)""",
+            (investigation_id, source, payload),
+        )
+        conn.commit()
+        conn.close()
+        logger.info(
+            "Resultados guardados para investigación id=%s (source=%s)",
+            investigation_id, source
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Error guardando resultados de investigación: {e}")
+        return False
+
+
+def list_investigations_for_user(
+    user_id: int,
+    db_path: str = 'data/users.db',
+):
+    """
+    Devuelve un listado básico de investigaciones de un usuario.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        c.execute(
+            """SELECT id, root_query, entity_type, label, created_at
+               FROM investigations
+               WHERE user_id=?
+               ORDER BY created_at DESC""",
+            (user_id,),
+        )
+        rows = c.fetchall()
+        conn.close()
+        return [
+            {
+                "id": r[0],
+                "root_query": r[1],
+                "entity_type": r[2],
+                "label": r[3],
+                "created_at": r[4],
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error(f"Error listando investigaciones para user_id {user_id}: {e}")
+        return []
+
+
+def get_investigation_with_results(
+    investigation_id: int,
+    db_path: str = 'data/users.db',
+):
+    """
+    Recupera una investigación y su snapshot de resultados (si existe).
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+
+        c.execute(
+            """SELECT id, user_id, root_query, entity_type, label, notes, created_at
+               FROM investigations
+               WHERE id=?""",
+            (investigation_id,),
+        )
+        inv = c.fetchone()
+        if not inv:
+            conn.close()
+            return None
+
+        investigation = {
+            "id": inv[0],
+            "user_id": inv[1],
+            "root_query": inv[2],
+            "entity_type": inv[3],
+            "label": inv[4],
+            "notes": inv[5],
+            "created_at": inv[6],
+        }
+
+        c.execute(
+            """SELECT id, source, result_json, created_at
+               FROM investigation_results
+               WHERE investigation_id=?
+               ORDER BY created_at DESC""",
+            (investigation_id,),
+        )
+        res_rows = c.fetchall()
+        conn.close()
+
+        results = []
+        for r in res_rows:
+            try:
+                payload = json.loads(r[2])
+            except Exception:
+                payload = None
+            results.append(
+                {
+                    "id": r[0],
+                    "source": r[1],
+                    "data": payload,
+                    "created_at": r[3],
+                }
+            )
+
+        investigation["results"] = results
+        return investigation
+    except Exception as e:
+        logger.error(f"Error obteniendo investigación id={investigation_id}: {e}")
         return None

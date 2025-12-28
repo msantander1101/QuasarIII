@@ -13,6 +13,12 @@ import streamlit as st
 from modules.search.advanced_search import search_multiple_sources
 from utils.dorks_upload import save_uploaded_dorks
 
+# 🔹 NUEVO: persistencia de investigaciones
+from core.db_manager import (
+    create_investigation,
+    save_investigation_results,
+)
+
 # Componentes UI
 from .components.person_card import render_person_card
 from .components.socmint_block import render_socmint_block
@@ -86,6 +92,13 @@ def show_person_search_ui():
         default=["people", "email", "social"]
     )
 
+    # 🔹 Usuario actual (para asociar investigación y configs)
+    #    Preferimos current_user_id, pero mantenemos fallback por compatibilidad.
+    effective_user_id = (
+        st.session_state.get("current_user_id")
+        or st.session_state.get("user_id", 1)
+    )
+
     # ------------------ ADVANCED OPTIONS ------------------
     with st.expander("⚙️ Opciones avanzadas", expanded=False):
         st.markdown("#### 🕵️‍♂️ Google Dorks personalizados")
@@ -97,7 +110,9 @@ def show_person_search_ui():
         )
 
         dorks_file = None
-        user_id = st.session_state.get("user_id", 1)
+
+        # 🔹 Usamos el mismo effective_user_id para dorks
+        user_id = effective_user_id
 
         if uploaded_dorks:
             dorks_file = save_uploaded_dorks(
@@ -134,12 +149,65 @@ def show_person_search_ui():
                         email=email or "",
                         username=username or None,
                         dorks_file=dorks_file or None,
-                        user_id=user_id,
+                        user_id=effective_user_id,
                     )
 
                 st.session_state["ps_results"] = res
                 st.session_state["ps_time"] = time.time()
                 st.success("Búsqueda finalizada")
+
+                # ===================================================
+                # 🔹 NUEVO: Crear entidad de INVESTIGACIÓN + snapshot
+                # ===================================================
+                try:
+                    # Inferimos tipo de entidad según el input más fuerte
+                    entity_type = "person"
+                    if email:
+                        entity_type = "email"
+                    elif domain:
+                        entity_type = "domain"
+                    elif username:
+                        entity_type = "username"
+
+                    label = name or email or username or domain or query
+
+                    inv_id = create_investigation(
+                        user_id=effective_user_id,
+                        root_query=query,
+                        entity_type=entity_type,
+                        label=label,
+                        notes="",  # más adelante puedes exponer notas en la UI
+                    )
+
+                    if inv_id:
+                        saved = save_investigation_results(
+                            investigation_id=inv_id,
+                            results=res,
+                            source="combined",
+                        )
+                        if saved:
+                            logger.info(
+                                "[trace=%s] Investigación guardada | inv_id=%s | user_id=%s",
+                                res.get("_metadata", {}).get("trace_id"),
+                                inv_id,
+                                effective_user_id,
+                            )
+                            # Guardamos también en sesión por si la UI lo quiere usar después
+                            st.session_state["ps_last_investigation_id"] = inv_id
+                        else:
+                            logger.warning(
+                                "No se pudo guardar snapshot de resultados para investigación id=%s",
+                                inv_id,
+                            )
+                    else:
+                        logger.warning(
+                            "No se pudo crear investigación para query=%s user_id=%s",
+                            query,
+                            effective_user_id,
+                        )
+                except Exception as e:
+                    logger.warning("Error guardando investigación y resultados: %s", e)
+                # ===================================================
 
             except Exception as e:
                 logger.exception("Person search error")

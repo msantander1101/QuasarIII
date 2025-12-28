@@ -14,6 +14,8 @@ import streamlit as st
 from core.db_manager import (
     list_investigations_for_user,
     get_investigation_with_results,
+    update_investigation_notes,   # 🔹 NUEVO: actualizar notas
+    delete_investigation,         # 🔹 NUEVO: borrar investigación
 )
 
 # Reutilizamos componentes de person_search
@@ -134,6 +136,13 @@ def show_investigations_page():
         st.error("No hay usuario autenticado. No se pueden mostrar investigaciones.")
         return
 
+    # 🔙 Botón para volver al dashboard
+    col_back, _ = st.columns([1, 3])
+    with col_back:
+        if st.button("← Volver al Dashboard", use_container_width=True):
+            st.session_state["page"] = "dashboard"
+            st.rerun()
+
     st.markdown("""
     <div style="background:linear-gradient(135deg,#1f2937,#111827);
                 padding:18px;border-radius:12px;margin-bottom:20px">
@@ -200,8 +209,58 @@ def show_investigations_page():
         st.markdown(f"**Tipo de entidad:** `{inv_data.get('entity_type') or 'desconocido'}`")
     with col_b:
         st.markdown(f"**Creada:** `{inv_data.get('created_at')}`")
-        notes = inv_data.get("notes") or "—"
-        st.markdown(f"**Notas:** {notes}")
+        notes_preview = inv_data.get("notes") or "—"
+        st.markdown(f"**Notas actuales:** {notes_preview}")
+
+    # ------------- Edición y borrado de investigación -------------
+
+    st.markdown("---")
+    st.markdown("### ✏️ Gestionar investigación")
+
+    # Editar notas
+    new_notes = st.text_area(
+        "📝 Notas de la investigación",
+        value=inv_data.get("notes") or "",
+        key=f"inv_notes_{selected_id}",
+        help="Añade contexto analítico, hipótesis, hallazgos clave, etc.",
+    )
+
+    col_save, col_delete = st.columns(2)
+
+    with col_save:
+        if st.button("💾 Guardar cambios", key=f"inv_save_{selected_id}", use_container_width=True):
+            ok = update_investigation_notes(selected_id, new_notes)
+            if ok:
+                st.success("Notas de la investigación actualizadas correctamente.")
+                st.session_state["ps_last_investigation_id"] = selected_id
+                st.rerun()
+            else:
+                st.error("No se pudieron actualizar las notas de la investigación.")
+
+    with col_delete:
+        if st.button("🗑️ Eliminar investigación", key=f"inv_delete_{selected_id}", use_container_width=True):
+            # Confirmación simple (segunda pulsación)
+            st.session_state[f"confirm_delete_{selected_id}"] = True
+
+    if st.session_state.get(f"confirm_delete_{selected_id}"):
+        st.warning("⚠️ ¿Seguro que quieres eliminar esta investigación? Esta acción no se puede deshacer.")
+        col_confirm, col_cancel = st.columns(2)
+        with col_confirm:
+            if st.button("✅ Confirmar eliminación", key=f"inv_confirm_{selected_id}", use_container_width=True):
+                deleted = delete_investigation(selected_id)
+                if deleted:
+                    st.success(f"Investigación #{selected_id} eliminada.")
+                    # Limpiamos flag y recargamos para refrescar la lista
+                    st.session_state.pop(f"confirm_delete_{selected_id}", None)
+                    st.rerun()
+                else:
+                    st.error("No se pudo eliminar la investigación.")
+        with col_cancel:
+            if st.button("❌ Cancelar", key=f"inv_cancel_{selected_id}", use_container_width=True):
+                st.session_state.pop(f"confirm_delete_{selected_id}", None)
+                st.info("Eliminación cancelada.")
+
+    # ------------- Snapshots de resultados -------------
 
     snapshots = inv_data.get("results") or []
     if not snapshots:
@@ -209,6 +268,7 @@ def show_investigations_page():
         return
 
     # Información rápida sobre snapshots
+    st.markdown("---")
     st.markdown("##### 🧬 Snapshots almacenados")
     for s in snapshots:
         st.markdown(

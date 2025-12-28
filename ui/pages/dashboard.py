@@ -151,17 +151,7 @@ def show_dashboard():
     else:
         st.warning("Accede al sistema para ver tus búsquedas.")
 
-    # Panel de información de seguridad
-    st.markdown("### 🔐 Seguridad y Privacidad")
-
-    st.markdown("""
-        <div style="padding: 15px; border-radius: 8px; background-color: #e7f3ff;">
-            <h4>🔐 Tu Seguridad Es Prioridad</h4>
-            <p>✅ Todos los datos están encriptados</p>
-            <p>✅ Acceso solo por usuario autenticado</p>
-            <p>✅ Protocolos avanzados de protección de datos</p>
-        </div>
-    """, unsafe_allow_html=True)
+    # 🔐 Bloque de Seguridad y Privacidad eliminado
 
     # Cierre de sesión
     st.markdown("<hr>", unsafe_allow_html=True)

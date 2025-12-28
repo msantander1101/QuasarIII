@@ -192,8 +192,9 @@ def show_person_search_ui():
                                 inv_id,
                                 effective_user_id,
                             )
-                            # Guardamos también en sesión por si la UI lo quiere usar después
+                            # Guardamos también en sesión para la UI
                             st.session_state["ps_last_investigation_id"] = inv_id
+                            st.session_state["ps_last_investigation_saved"] = True
                         else:
                             logger.warning(
                                 "No se pudo guardar snapshot de resultados para investigación id=%s",
@@ -279,6 +280,14 @@ def show_person_search_ui():
         f"⏱ Tiempo: {meta.get('search_time','N/A')}s | "
         f"Fuentes: {', '.join(meta.get('sources_searched', []))}"
     )
+
+    # ------------------ INFO INVESTIGACIÓN + BOTÓN IR ------------------
+    last_inv_id = st.session_state.get("ps_last_investigation_id")
+    if last_inv_id:
+        st.info(f"🧾 Investigación #{last_inv_id} guardada para este caso.")
+        if st.button("📂 Abrir en Investigaciones", use_container_width=True, key="btn_open_investigation_from_person"):
+            st.session_state["page"] = "investigations"
+            st.rerun()
 
     # ------------------ VOLVER ------------------
     st.markdown("---")

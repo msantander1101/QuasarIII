@@ -1,7 +1,14 @@
 # ui/pages/dashboard.py
 
 import streamlit as st
-from core.db_manager import get_persons_by_user, get_graph_for_user
+from core.db_manager import (
+    get_persons_by_user,
+    get_graph_for_user,
+    # 🔹 NUEVO: helpers para investigaciones
+    list_investigations_for_user,
+    update_investigation_notes,
+    delete_investigation,
+)
 import json
 import logging
 from datetime import datetime
@@ -47,7 +54,8 @@ def show_dashboard():
     # Navegación interna con botones
     st.markdown("### ⚡ Acciones Rápidas")
 
-    cols = st.columns(4)
+    # 🔹 Pasamos de 4 a 5 columnas para añadir Investigaciones
+    cols = st.columns(5)
 
     with cols[0]:
         if st.button("🔍 Búsqueda Avanzada", use_container_width=True,
@@ -74,6 +82,14 @@ def show_dashboard():
         if st.button("📄 Reportes", use_container_width=True,
                      key="btn_reports", help="Generar informes profesionales"):
             st.session_state['page'] = 'report_generation'
+            st.session_state['force_reload'] = True
+            st.rerun()
+
+    # 🔹 Nueva acción rápida: ir a la página de Investigaciones
+    with cols[4]:
+        if st.button("📂 Investigaciones", use_container_width=True,
+                     key="btn_investigations", help="Gestionar investigaciones guardadas"):
+            st.session_state['page'] = 'investigations'
             st.session_state['force_reload'] = True
             st.rerun()
 
@@ -151,7 +167,71 @@ def show_dashboard():
     else:
         st.warning("Accede al sistema para ver tus búsquedas.")
 
-    # 🔐 Bloque de Seguridad y Privacidad eliminado
+    # 🔹 NUEVO: Panel de Investigaciones (ver / editar notas / borrar)
+    st.markdown("### 📂 Investigaciones")
+
+    if user_id:
+        try:
+            investigations = list_investigations_for_user(user_id)
+        except Exception as e:
+            logger.error("Error listando investigaciones para usuario %s: %s", user_id, e)
+            investigations = []
+
+        if not investigations:
+            st.info("Todavía no tienes investigaciones guardadas.")
+        else:
+            # Mostramos solo las últimas 5 para no saturar el dashboard
+            for inv in investigations[:5]:
+                inv_id = inv.get("id")
+                label = inv.get("label") or inv.get("root_query") or f"Investigación {inv_id}"
+                entity_type = inv.get("entity_type") or "desconocido"
+                created_at = inv.get("created_at") or ""
+                notes = inv.get("notes") or ""
+
+                with st.expander(f"#{inv_id} • {label} ({entity_type}) • {created_at}", expanded=False):
+                    st.write(f"**Root query:** `{inv.get('root_query')}`")
+                    st.write(f"**Tipo de entidad:** `{entity_type}`")
+
+                    # ✅ Editar notas de la investigación
+                    new_notes = st.text_area(
+                        "Notas de la investigación",
+                        value=notes,
+                        key=f"inv_notes_{inv_id}",
+                        height=80,
+                    )
+
+                    cols_inv = st.columns(3)
+
+                    # Guardar cambios en notas
+                    with cols_inv[0]:
+                        if st.button("💾 Guardar notas", key=f"btn_save_inv_{inv_id}"):
+                            ok = update_investigation_notes(inv_id, new_notes)
+                            if ok:
+                                st.success("Notas actualizadas.")
+                            else:
+                                st.error("No se pudieron actualizar las notas.")
+                            st.rerun()
+
+                    # Abrir detalle en la página de Investigaciones
+                    with cols_inv[1]:
+                        if st.button("📂 Abrir detalle", key=f"btn_open_inv_{inv_id}"):
+                            # Guardamos el seleccionado en sesión para que la página de investigaciones lo use
+                            st.session_state["inv_selected_id"] = inv_id
+                            st.session_state["page"] = "investigations"
+                            st.session_state["force_reload"] = True
+                            st.rerun()
+
+                    # Eliminar investigación
+                    with cols_inv[2]:
+                        if st.button("🗑️ Eliminar", key=f"btn_del_inv_{inv_id}"):
+                            ok = delete_investigation(inv_id)
+                            if ok:
+                                st.success(f"Investigación #{inv_id} eliminada.")
+                            else:
+                                st.error("No se pudo eliminar la investigación.")
+                            st.rerun()
+    else:
+        st.warning("Accede al sistema para gestionar tus investigaciones.")
 
     # Cierre de sesión
     st.markdown("<hr>", unsafe_allow_html=True)

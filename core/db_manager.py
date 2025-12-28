@@ -6,6 +6,7 @@ import json
 # Configurar logger
 logger = logging.getLogger(__name__)
 
+
 def create_db(db_path: str = 'data/users.db'):
     """
     Crea la base de datos SQLite e inicializa las tablas si no existen.
@@ -75,6 +76,7 @@ def create_db(db_path: str = 'data/users.db'):
                         FOREIGN KEY (user_id) REFERENCES users (id),
                         UNIQUE(user_id, config_key)
                     )''')
+
         # Tabla de INVESTIGACIONES (búsquedas agrupadas en una entidad)
         c.execute('''CREATE TABLE IF NOT EXISTS investigations (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,14 +107,17 @@ def create_db(db_path: str = 'data/users.db'):
         logger.error(f"Error al crear tablas: {e}")
         return False
 
+
 # --- FUNCIONES CRUD BÁSICAS de PERSONAS ---
 def create_person(user_id: int, name: str, email: str = "", phone: str = "", location: str = "", description: str = "", db_path: str = 'data/users.db'):
     """Crea una nueva persona en la base de datos."""
     try:
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
-        c.execute("INSERT INTO persons (user_id, name, email, phone, location, description) VALUES (?, ?, ?, ?, ?, ?)",
-                  (user_id, name, email, phone, location, description))
+        c.execute(
+            "INSERT INTO persons (user_id, name, email, phone, location, description) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, name, email, phone, location, description)
+        )
         person_id = c.lastrowid
         conn.commit()
         conn.close()
@@ -122,12 +127,16 @@ def create_person(user_id: int, name: str, email: str = "", phone: str = "", loc
         logger.error(f"Error creando persona: {e}")
         return None
 
+
 def get_person_by_id(person_id: int, db_path: str = 'data/users.db'):
     """Obtiene información de una persona por su ID."""
     try:
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
-        c.execute("SELECT id, user_id, name, email, phone, location, description, created_at FROM persons WHERE id=?", (person_id,))
+        c.execute(
+            "SELECT id, user_id, name, email, phone, location, description, created_at FROM persons WHERE id=?",
+            (person_id,)
+        )
         person = c.fetchone()
         conn.close()
         if person:
@@ -146,19 +155,35 @@ def get_person_by_id(person_id: int, db_path: str = 'data/users.db'):
         logger.error(f"Error obteniendo persona por ID: {e}")
         return None
 
+
 def get_persons_by_user(user_id: int, db_path: str = 'data/users.db'):
     """Obtiene todas las personas asociadas a un usuario (para el historial de búsquedas)."""
     try:
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
-        c.execute("SELECT id, name, email, phone, location, description, created_at FROM persons WHERE user_id=? ORDER BY created_at DESC", (user_id,))
+        c.execute(
+            "SELECT id, name, email, phone, location, description, created_at FROM persons WHERE user_id=? ORDER BY created_at DESC",
+            (user_id,)
+        )
         persons = c.fetchall()
         conn.close()
         # Convertir a lista de diccionarios
-        return [{"id": p[0], "name": p[1], "email": p[2], "phone": p[3], "location": p[4], "description": p[5], "created_at": p[6]} for p in persons]
+        return [
+            {
+                "id": p[0],
+                "name": p[1],
+                "email": p[2],
+                "phone": p[3],
+                "location": p[4],
+                "description": p[5],
+                "created_at": p[6]
+            }
+            for p in persons
+        ]
     except Exception as e:
         logger.error(f"Error obteniendo personas por usuario: {e}")
         return []
+
 
 # --- FUNCIONES CRUD BÁSICAS de RELACIONES ---
 def create_relationship(person1_id: int, person2_id: int, relationship_type: str, details: str = "", db_path: str = 'data/users.db'):
@@ -166,8 +191,10 @@ def create_relationship(person1_id: int, person2_id: int, relationship_type: str
     try:
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
-        c.execute("INSERT INTO relationships (person1_id, person2_id, relationship_type, details) VALUES (?, ?, ?, ?)",
-                  (person1_id, person2_id, relationship_type, details))
+        c.execute(
+            "INSERT INTO relationships (person1_id, person2_id, relationship_type, details) VALUES (?, ?, ?, ?)",
+            (person1_id, person2_id, relationship_type, details)
+        )
         rel_id = c.lastrowid
         conn.commit()
         conn.close()
@@ -176,6 +203,7 @@ def create_relationship(person1_id: int, person2_id: int, relationship_type: str
     except Exception as e:
         logger.error(f"Error creando relación: {e}")
         return None
+
 
 def get_relationships_for_person(person_id: int, db_path: str = 'data/users.db'):
     """Obtiene todas las relaciones de una persona."""
@@ -220,6 +248,7 @@ def get_relationships_for_person(person_id: int, db_path: str = 'data/users.db')
         logger.error(f"Error obteniendo relaciones: {e}")
         return []
 
+
 def get_all_relationships_for_persons(person_ids: list, db_path: str = 'data/users.db'):
     """
     Obtiene todas las relaciones que involucran un conjunto de personas.
@@ -238,10 +267,20 @@ def get_all_relationships_for_persons(person_ids: list, db_path: str = 'data/use
         results = c.fetchall()
         conn.close()
         # Convertir a una lista de diccionarios
-        return [{"id": row[0], "person1_id": row[1], "person2_id": row[2], "type": row[3], "details": row[4]} for row in results]
+        return [
+            {
+                "id": row[0],
+                "person1_id": row[1],
+                "person2_id": row[2],
+                "type": row[3],
+                "details": row[4]
+            }
+            for row in results
+        ]
     except Exception as e:
         logger.error(f"Error obteniendo relaciones múltiples: {e}")
         return []
+
 
 # --- FUNCIONES AUXILIARES DE BÚSQUEDA ---
 def search_persons_by_criteria(user_id: int, criteria: dict, db_path: str = 'data/users.db'):
@@ -268,10 +307,22 @@ def search_persons_by_criteria(user_id: int, criteria: dict, db_path: str = 'dat
         c.execute(query, params)
         results = c.fetchall()
         conn.close()
-        return [{"id": row[0], "name": row[1], "email": row[2], "phone": row[3], "location": row[4], "description": row[5], "created_at": row[6]} for row in results]
+        return [
+            {
+                "id": row[0],
+                "name": row[1],
+                "email": row[2],
+                "phone": row[3],
+                "location": row[4],
+                "description": row[5],
+                "created_at": row[6]
+            }
+            for row in results
+        ]
     except Exception as e:
         logger.error(f"Error en búsqueda por criterios: {e}")
         return []
+
 
 # --- FUNCIONES PARA EL GRAFO (GRAFOS COMPLETOS) ---
 def get_graph_for_user(user_id: int, db_path: str = 'data/users.db'):
@@ -294,13 +345,15 @@ def get_graph_for_user(user_id: int, db_path: str = 'data/users.db'):
             "target": r["person2_id"],
             "type": r["type"],
             "details": r["details"]
-        } for r in all_rels
+        }
+        for r in all_rels
     ]
 
     # Agregar también personas no conectadas al grafo (pueden ser nodos "aislados")
     # Esto ya lo tenemos en 'persons'
 
     return {"persons": persons, "relationships": relationships}
+
 
 # --- FUNCIONES PARA CONFIGURACIONES ---
 def save_user_config(user_id: int, config_key: str, config_value: str, encrypt_value: bool = False, db_path: str = 'data/users.db') -> bool:
@@ -311,8 +364,11 @@ def save_user_config(user_id: int, config_key: str, config_value: str, encrypt_v
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
         encrypted = 1 if encrypt_value else 0
-        c.execute('''INSERT OR REPLACE INTO user_configs (user_id, config_key, config_value, encrypted) 
-                     VALUES (?, ?, ?, ?)''', (user_id, config_key, config_value, encrypted))
+        c.execute(
+            '''INSERT OR REPLACE INTO user_configs (user_id, config_key, config_value, encrypted) 
+               VALUES (?, ?, ?, ?)''',
+            (user_id, config_key, config_value, encrypted)
+        )
         conn.commit()
         conn.close()
         logger.info(f"Configuración guardada para usuario {user_id}: {config_key}")
@@ -320,6 +376,7 @@ def save_user_config(user_id: int, config_key: str, config_value: str, encrypt_v
     except Exception as e:
         logger.error(f"Error al guardar configuración: {e}")
         return False
+
 
 def get_user_config(user_id: int, config_key: str, db_path: str = 'data/users.db') -> str:
     """
@@ -329,13 +386,17 @@ def get_user_config(user_id: int, config_key: str, db_path: str = 'data/users.db
     try:
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
-        c.execute("SELECT config_value FROM user_configs WHERE user_id=? AND config_key=?", (user_id, config_key))
+        c.execute(
+            "SELECT config_value FROM user_configs WHERE user_id=? AND config_key=?",
+            (user_id, config_key)
+        )
         result = c.fetchone()
         conn.close()
         return result[0] if result else None
     except Exception as e:
         logger.error(f"Error obteniendo configuración para usuario {user_id} clave {config_key}: {e}")
         return None
+
 
 def delete_user_config(user_id: int, config_key: str, db_path: str = 'data/users.db') -> bool:
     """
@@ -344,7 +405,10 @@ def delete_user_config(user_id: int, config_key: str, db_path: str = 'data/users
     try:
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
-        c.execute("DELETE FROM user_configs WHERE user_id=? AND config_key=?", (user_id, config_key))
+        c.execute(
+            "DELETE FROM user_configs WHERE user_id=? AND config_key=?",
+            (user_id, config_key)
+        )
         conn.commit()
         rows_impacted = c.rowcount
         conn.close()
@@ -354,6 +418,7 @@ def delete_user_config(user_id: int, config_key: str, db_path: str = 'data/users
         logger.error(f"Error eliminando configuración: {e}")
         return False
 
+
 def list_user_configs(user_id: int, db_path: str = 'data/users.db') -> list:
     """
     Devuelve todas las configuraciones disponibles para un usuario (sin los valores realmente sensibles).
@@ -362,7 +427,10 @@ def list_user_configs(user_id: int, db_path: str = 'data/users.db') -> list:
     try:
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
-        c.execute("SELECT config_key, created_at, updated_at FROM user_configs WHERE user_id=?", (user_id,))
+        c.execute(
+            "SELECT config_key, created_at, updated_at FROM user_configs WHERE user_id=?",
+            (user_id,)
+        )
         results = c.fetchall()
         conn.close()
         return [
@@ -370,11 +438,13 @@ def list_user_configs(user_id: int, db_path: str = 'data/users.db') -> list:
                 "config_key": r[0],
                 "created_at": r[1],
                 "updated_at": r[2]
-            } for r in results
+            }
+            for r in results
         ]
     except Exception as e:
         logger.error(f"Error listando configuraciones: {e}")
         return []
+
 
 # --- FUNCIONES AUXILIARES PARA USUARIOS ---
 def get_user_by_username(username: str, db_path: str = 'data/users.db'):
@@ -385,13 +455,17 @@ def get_user_by_username(username: str, db_path: str = 'data/users.db'):
     try:
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
-        c.execute("SELECT id, username, email, password_hash FROM users WHERE username=?", (username,))
+        c.execute(
+            "SELECT id, username, email, password_hash FROM users WHERE username=?",
+            (username,)
+        )
         user = c.fetchone()
         conn.close()
         return user
     except Exception as e:
         logger.error(f"Error obteniendo usuario por nombre de usuario: {e}")
         return None
+
 
 def get_user_by_id(user_id: int, db_path: str = 'data/users.db'):
     """
@@ -401,13 +475,17 @@ def get_user_by_id(user_id: int, db_path: str = 'data/users.db'):
     try:
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
-        c.execute("SELECT id, username, email FROM users WHERE id=?", (user_id,))
+        c.execute(
+            "SELECT id, username, email FROM users WHERE id=?",
+            (user_id,)
+        )
         user = c.fetchone()
         conn.close()
         return user
     except Exception as e:
         logger.error(f"Error obteniendo usuario por ID: {e}")
         return None
+
 
 # --- FUNCIONES PARA INVESTIGACIONES / CASOS ---
 
@@ -483,12 +561,13 @@ def list_investigations_for_user(
 ):
     """
     Devuelve un listado básico de investigaciones de un usuario.
+    Incluye notes para poder editarlas desde la UI.
     """
     try:
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
         c.execute(
-            """SELECT id, root_query, entity_type, label, created_at
+            """SELECT id, root_query, entity_type, label, notes, created_at
                FROM investigations
                WHERE user_id=?
                ORDER BY created_at DESC""",
@@ -502,7 +581,8 @@ def list_investigations_for_user(
                 "root_query": r[1],
                 "entity_type": r[2],
                 "label": r[3],
-                "created_at": r[4],
+                "notes": r[4],
+                "created_at": r[5],
             }
             for r in rows
         ]
@@ -573,3 +653,69 @@ def get_investigation_with_results(
     except Exception as e:
         logger.error(f"Error obteniendo investigación id={investigation_id}: {e}")
         return None
+
+
+def update_investigation_notes(
+    investigation_id: int,
+    notes: str,
+    db_path: str = 'data/users.db',
+) -> bool:
+    """
+    Actualiza las notas de una investigación concreta.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        c.execute(
+            """UPDATE investigations
+               SET notes=?
+               WHERE id=?""",
+            (notes, investigation_id),
+        )
+        conn.commit()
+        rows = c.rowcount
+        conn.close()
+        logger.info(
+            "Notas actualizadas para investigación id=%s (rows=%s)",
+            investigation_id, rows
+        )
+        return rows > 0
+    except Exception as e:
+        logger.error(f"Error actualizando notas de investigación id={investigation_id}: {e}")
+        return False
+
+
+def delete_investigation(
+    investigation_id: int,
+    db_path: str = 'data/users.db',
+) -> bool:
+    """
+    Elimina una investigación y todos sus snapshots de resultados asociados.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+
+        # Primero borramos los resultados asociados
+        c.execute(
+            "DELETE FROM investigation_results WHERE investigation_id=?",
+            (investigation_id,),
+        )
+
+        # Luego la investigación en sí
+        c.execute(
+            "DELETE FROM investigations WHERE id=?",
+            (investigation_id,),
+        )
+        conn.commit()
+        rows = c.rowcount
+        conn.close()
+
+        logger.info(
+            "Investigación eliminada id=%s (rows=%s)",
+            investigation_id, rows
+        )
+        return rows > 0
+    except Exception as e:
+        logger.error(f"Error eliminando investigación id={investigation_id}: {e}")
+        return False

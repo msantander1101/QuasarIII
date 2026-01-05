@@ -291,7 +291,6 @@ def _render_card(card: Dict[str, Any]):
     domain = _get_domain(url)
     fav = _favicon_url(domain)
 
-    # Chips
     chips = [
         _chip(f"{_entity_icon(entity_type)} {entity_type}"),
         _chip(f"{_match_icon(match_type)} {match_type}"),
@@ -357,21 +356,22 @@ def _render_card(card: Dict[str, Any]):
         st.code(url)
 
 
-def _flatten_dorks_results(dorks_block: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _flatten_dorks_results(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    ✅ NUEVO COMPORTAMIENTO:
-    - Solo devuelve tarjetas si HAY subresults reales.
-    - Si un dork no extrae nada => NO se añade nada.
+    Convierte:
+      [ {pattern/query/results:[hits...]}, ... ]
+    en:
+      [ cards... ]
+    Solo devuelve tarjetas si hay hits reales (subresults).
     """
-    entries = dorks_block.get("results") or []
     flat: List[Dict[str, Any]] = []
 
-    for entry in entries:
+    for entry in entries or []:
         if not isinstance(entry, dict):
             continue
 
         pattern = entry.get("pattern") or entry.get("title") or "Dork"
-        q_used = entry.get("query") or ""
+        q_used = entry.get("query") or entry.get("query_used") or ""
         source = entry.get("source") or "google_dorks"
         engine = entry.get("engine")
         confidence = entry.get("confidence")
@@ -406,24 +406,75 @@ def _flatten_dorks_results(dorks_block: Dict[str, Any]) -> List[Dict[str, Any]]:
     return flat
 
 
+def _render_attempted_dorks_table(diag_entries: List[Dict[str, Any]]):
+    """
+    Muestra qué dorks se intentaron (aunque no hubiera hits).
+    Importante: en diag_entries, cada entry viene con:
+      - pattern
+      - query
+      - engine
+      - no_results_hint
+      - filtered_out/raw_hits_count/subresults_count (a veces)
+      - google_url
+    """
+    if not diag_entries:
+        return
+
+    # reducir ruido: 1 fila por patrón/query (los diag ya vienen así normalmente)
+    rows: List[Dict[str, Any]] = []
+    for e in diag_entries:
+        if not isinstance(e, dict):
+            continue
+        rows.append({
+            "pattern": e.get("pattern"),
+            "query": e.get("query"),
+            "engine": e.get("engine"),
+            "hint": e.get("no_results_hint"),
+            "raw_hits": e.get("raw_hits_count"),
+            "filtered_out": e.get("filtered_out"),
+            "subresults": e.get("subresults_count"),
+            "google_url": e.get("google_url") or e.get("url"),
+        })
+
+    st.caption(f"Dorks intentados: {len(rows)} (diagnóstico)")
+    for r in rows:
+        pat = (r.get("pattern") or "—").strip()
+        q = (r.get("query") or "—").strip()
+        eng = r.get("engine") or "—"
+        hint = r.get("hint") or "—"
+
+        with st.expander(f"🔎 {pat}  •  eng={eng}  •  hint={hint}", expanded=False):
+            st.caption("Consulta ejecutada")
+            st.code(q)
+            # link directo a google (aunque el motor sea ddg, es útil para el analista)
+            gurl = r.get("google_url")
+            if gurl:
+                st.markdown(f"[Abrir en navegador]({gurl})")
+            st.caption("Métricas")
+            st.json({
+                "raw_hits": r.get("raw_hits"),
+                "filtered_out": r.get("filtered_out"),
+                "subresults": r.get("subresults"),
+                "hint": hint,
+                "engine": eng,
+            })
+
+
 def render_dorks_block(dorks_block: Dict[str, Any]):
-    # Si no es dict, fuera
     if not isinstance(dorks_block, dict):
         return
 
-    # CSS (una vez)
     st.markdown(_DORKS_CSS, unsafe_allow_html=True)
-
-    # ✅ SIEMPRE mostramos cabecera (aunque no haya hits)
     st.markdown("### 🕵️‍♂️ Google Dorks")
 
-    # errores (mantenemos visibles)
+    # errores del bloque dorks
     for err in dorks_block.get("errors") or []:
         st.warning(f"Dorks: {err}")
 
-    cards = _flatten_dorks_results(dorks_block)
+    entries = dorks_block.get("results") or []
+    cards = _flatten_dorks_results(entries)
 
-    # ✅ NUEVO: si no hay cards, mostramos diagnóstico en vez de ocultar
+    # ✅ Si no hay hits, mostramos diagnóstico (nuevo: usa dorks_block["diagnostic"] si existe)
     if not cards:
         st.info(
             "No se encontraron **hits reales** para los dorks ejecutados.\n\n"
@@ -434,28 +485,28 @@ def render_dorks_block(dorks_block: Dict[str, Any]):
             "- Red/DNS/proxy (en tus logs aparece fallo de resolución)\n"
         )
 
-        # Ayuda rápida con contexto
         meta_bits = []
         dorks_file = dorks_block.get("dorks_file")
         if dorks_file:
             meta_bits.append(f"📄 dorks_file: `{dorks_file}`")
-
         used = dorks_block.get("query")
         if used:
             meta_bits.append(f"🔎 query: `{used}`")
-
         if meta_bits:
             st.caption(" | ".join(meta_bits))
 
-        # Mostrar debug técnico (sin romper nada si no existe)
-        with st.expander("🔧 Diagnóstico (qué se intentó)", expanded=False):
-            st.caption("Bloque dorks (raw)")
-            st.json(dorks_block)
+        diag_entries = dorks_block.get("diagnostic") or []
+        if diag_entries:
+            st.markdown("#### 🔧 Diagnóstico (qué se intentó)")
+            _render_attempted_dorks_table(diag_entries)
+        else:
+            # fallback: raw completo solo si NO hay diagnóstico
+            with st.expander("🔧 Diagnóstico (raw)", expanded=False):
+                st.json(dorks_block)
 
         return
 
-    # ✅ Ordenación PRO (sin agrupar)
-    # prioridad: relevance desc -> risk desc -> conf desc -> domain asc (estable)
+    # ✅ Ordenación: relevance desc -> risk desc -> conf desc -> domain asc
     def _sort_key(c: Dict[str, Any]):
         rel = _safe_int(c.get("relevance_score"), default=0) or 0
         risk = _risk_rank(c.get("risk_level"))

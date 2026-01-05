@@ -87,6 +87,10 @@ def main():
     # -------------------------------------------------
     create_db()
 
+    # ✅ Fuerza migración del esquema users (role/is_active) después de create_db()
+    # Esto evita que create_db cree una tabla antigua sin columnas y rompa el bootstrap.
+    auth_manager._ensure_schema()
+
     # -------------------------------------------------
     # Bootstrap admin (clave en Cloud)
     # -------------------------------------------------

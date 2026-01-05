@@ -60,8 +60,14 @@ class AuthManager:
     def _ensure_schema(self) -> None:
         """
         Asegura que la tabla 'users' exista y tenga columnas role e is_active.
+        También crea el directorio del DB si no existe.
         """
         try:
+            # ✅ Asegura que la carpeta del fichero exista (evita "unable to open database file")
+            db_dir = os.path.dirname(self.db_path)
+            if db_dir:
+                os.makedirs(db_dir, exist_ok=True)
+
             conn = sqlite3.connect(self.db_path)
             c = conn.cursor()
 
@@ -76,16 +82,15 @@ class AuthManager:
                 )"""
             )
 
-            # Añadir columnas role / is_active si no existen
-            try:
-                c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'analyst'")
-            except sqlite3.OperationalError:
-                pass
+            # ✅ Migración robusta: inspecciona columnas y altera solo si faltan
+            c.execute("PRAGMA table_info(users)")
+            cols = {row[1] for row in c.fetchall()}
 
-            try:
+            if "role" not in cols:
+                c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'analyst'")
+
+            if "is_active" not in cols:
                 c.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1")
-            except sqlite3.OperationalError:
-                pass
 
             conn.commit()
             conn.close()

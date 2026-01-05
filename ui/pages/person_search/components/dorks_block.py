@@ -414,14 +414,44 @@ def render_dorks_block(dorks_block: Dict[str, Any]):
     # CSS (una vez)
     st.markdown(_DORKS_CSS, unsafe_allow_html=True)
 
-    # errores (si quieres mantenerlos visibles)
+    # ✅ SIEMPRE mostramos cabecera (aunque no haya hits)
+    st.markdown("### 🕵️‍♂️ Google Dorks")
+
+    # errores (mantenemos visibles)
     for err in dorks_block.get("errors") or []:
         st.warning(f"Dorks: {err}")
 
     cards = _flatten_dorks_results(dorks_block)
 
-    # ✅ Si NO hay hits reales => NO mostramos bloque
+    # ✅ NUEVO: si no hay cards, mostramos diagnóstico en vez de ocultar
     if not cards:
+        st.info(
+            "No se encontraron **hits reales** para los dorks ejecutados.\n\n"
+            "Posibles causas comunes:\n"
+            "- El motor (DDG/Google) está bloqueando o limitando\n"
+            "- `only_with_hits=True` descarta dorks sin resultados\n"
+            "- La consulta es muy específica o poco indexada\n"
+            "- Red/DNS/proxy (en tus logs aparece fallo de resolución)\n"
+        )
+
+        # Ayuda rápida con contexto
+        meta_bits = []
+        dorks_file = dorks_block.get("dorks_file")
+        if dorks_file:
+            meta_bits.append(f"📄 dorks_file: `{dorks_file}`")
+
+        used = dorks_block.get("query")
+        if used:
+            meta_bits.append(f"🔎 query: `{used}`")
+
+        if meta_bits:
+            st.caption(" | ".join(meta_bits))
+
+        # Mostrar debug técnico (sin romper nada si no existe)
+        with st.expander("🔧 Diagnóstico (qué se intentó)", expanded=False):
+            st.caption("Bloque dorks (raw)")
+            st.json(dorks_block)
+
         return
 
     # ✅ Ordenación PRO (sin agrupar)
@@ -435,7 +465,6 @@ def render_dorks_block(dorks_block: Dict[str, Any]):
 
     cards.sort(key=_sort_key)
 
-    st.markdown("### 🕵️‍♂️ Google Dorks")
     st.caption(f"{len(cards)} resultados extraídos (ordenados por relevancia/riesgo/confianza)")
 
     cols = st.columns(2)

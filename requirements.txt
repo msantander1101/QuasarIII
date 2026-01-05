@@ -23,3 +23,5 @@ pyyaml
 fastapi
 pydantic
 uvicorn
+langchain
+langchain-community

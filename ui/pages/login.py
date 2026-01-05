@@ -199,7 +199,7 @@ def show_login_with_tabs() -> User | None:
             unsafe_allow_html=True,
         )
 
-        tab1, tab2 = st.tabs(["🔐 Iniciar sesión", "🛑 Registro deshabilitado"])
+        tab1, tab2 = st.tabs(["🔐 Iniciar sesión", "📝 Registrarse"])
 
         # ---------- TAB LOGIN ----------
         with tab1:

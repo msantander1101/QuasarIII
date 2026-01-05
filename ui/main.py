@@ -15,6 +15,7 @@ sys.path.insert(0, ROOT_DIR)
 # -------------------------------------------------
 from core.db_manager import create_db
 from core.config_manager import config_manager
+from core.auth_manager import auth_manager  # ⬅️ AÑADIDO
 from modules.ai.intelligence_core import initialize_ai_analyzer
 
 # -------------------------------------------------
@@ -26,16 +27,43 @@ from ui.pages.person_search import show_person_search_ui
 from ui.pages.graph_visualization import show_graph_visualization
 from ui.pages.settings import show_settings_page
 from ui.pages.report_generation import show_report_generation_page
-from ui.pages.admin_users import show_admin_users_page  # ⬅️ añadido
-from ui.pages.investigations import show_investigations_page  # ⬅️ añadido
+from ui.pages.admin_users import show_admin_users_page
+from ui.pages.investigations import show_investigations_page
 
 # -------------------------------------------------
 # Utils
 # -------------------------------------------------
-from ui.utils.helpers import clear_session  # si lo usas en otros sitios
+from ui.utils.helpers import clear_session
 from utils.logger import setup_logger
 
 logger = setup_logger()
+
+
+# =================================================
+# Bootstrap superusuario (Streamlit Secrets)
+# =================================================
+def bootstrap_superuser():
+    """
+    Crea un superusuario admin si no existe.
+    Idempotente y seguro para Streamlit Cloud.
+    """
+    admin_user = st.secrets.get("BOOTSTRAP_ADMIN_USER", "")
+    admin_pass = st.secrets.get("BOOTSTRAP_ADMIN_PASS", "")
+    admin_email = st.secrets.get("BOOTSTRAP_ADMIN_EMAIL", "")
+
+    if not (admin_user and admin_pass and admin_email):
+        logger.info("Bootstrap admin no configurado (secrets vacíos)")
+        return
+
+    try:
+        auth_manager.bootstrap_admin(
+            username=admin_user,
+            password=admin_pass,
+            email=admin_email,
+        )
+        logger.info("Bootstrap admin ejecutado correctamente")
+    except Exception:
+        logger.exception("Error durante bootstrap admin")
 
 
 # =================================================
@@ -51,13 +79,18 @@ def main():
         page_title="Quasar III OSINT Suite",
         page_icon="🕵️‍♂️",
         layout="wide",
-        initial_sidebar_state="collapsed"
+        initial_sidebar_state="collapsed",
     )
 
     # -------------------------------------------------
     # DB init
     # -------------------------------------------------
     create_db()
+
+    # -------------------------------------------------
+    # Bootstrap admin (clave en Cloud)
+    # -------------------------------------------------
+    bootstrap_superuser()
 
     # -------------------------------------------------
     # Session state defaults
@@ -71,7 +104,7 @@ def main():
         "search_count": 0,
         "current_timestamp": None,
         "active_tab": "login",
-        "force_reload": False,     # ⬅️ añadido para coherencia con dashboard
+        "force_reload": False,
     }
 
     for k, v in defaults.items():
@@ -90,7 +123,8 @@ def main():
     # -------------------------------------------------
     # Global styles
     # -------------------------------------------------
-    st.markdown("""
+    st.markdown(
+        """
         <style>
         .stApp {
             background: linear-gradient(135deg, #0a192f 0%, #274472 100%);
@@ -98,7 +132,9 @@ def main():
         MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         </style>
-    """, unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True,
+    )
 
     # -------------------------------------------------
     # Routing
@@ -125,10 +161,9 @@ def main():
             show_report_generation_page()
 
         elif page == "admin_users":
-            # El propio módulo hace el check de is_admin
             show_admin_users_page()
 
-        elif page == "investigations":  # ⬅️ NUEVO: página Investigaciones
+        elif page == "investigations":
             show_investigations_page()
 
         else:

@@ -273,6 +273,41 @@ class AuthManager:
             logger.error("Error cambiando rol de usuario %s: %s", uname, e)
             raise
 
+    def user_exists(self, username: str) -> bool:
+        uname = (username or "").strip().lower()
+        if not uname:
+            return False
+        try:
+            conn = sqlite3.connect(self.db_path)
+            c = conn.cursor()
+            c.execute("SELECT 1 FROM users WHERE LOWER(username)=? LIMIT 1", (uname,))
+            ok = c.fetchone() is not None
+            conn.close()
+            return ok
+        except Exception as e:
+            logger.error("Error comprobando existencia de usuario %s: %s", uname, e)
+            return False
+
+    def bootstrap_admin(self, username: str, password: str, email: str) -> None:
+        """
+        Crea un admin inicial si no existe. Idempotente.
+        """
+        uname = (username or "").strip().lower()
+        if not uname or not password or not email:
+            raise ValueError("bootstrap_admin requiere username/password/email")
+
+        if self.user_exists(uname):
+            return
+
+        self.create_user(
+            username=uname,
+            password=password,
+            email=email,
+            role="admin",
+            is_active=True,
+        )
+        logger.warning("BOOTSTRAP ADMIN creado: %s", uname)
+
 
 # Instancia global
 auth_manager = AuthManager()

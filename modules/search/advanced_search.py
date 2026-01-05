@@ -5,6 +5,7 @@ Todos los módulos (people, email, SOCMINT, domains, web, dorks)
 devuelven estructuras coherentes para UI/Streamlit.
 ✅ Logging con trace_id por búsqueda.
 ✅ Logs por fuente con has_data + counts.
+✅ Hardening dorks: evita doble ejecución, cap automático si solo DDG, y snapshot diagnóstico.
 """
 
 import time
@@ -13,6 +14,7 @@ import uuid
 from typing import Dict, Any, List, Optional
 
 from .correlation.profile_unifier import unify_profiles
+from core.config_manager import config_manager  # ✅ NUEVO: para detectar keys y aplicar caps
 
 logger = logging.getLogger(__name__)
 
@@ -165,18 +167,6 @@ class AdvancedSearcher:
     ) -> Dict[str, Any]:
         """
         Wrapper del módulo de brechas para integrarlo en el esquema del coordinador.
-
-        Espera que breach_search.search_breaches devuelva algo como:
-        {
-            "source": "breach",
-            "query": str,
-            "user_id": int,
-            "timestamp": float,
-            "results": [ ... ],
-            "errors": [ ... ],
-            "has_data": bool,
-            "search_time": float,
-        }
         """
         out: Dict[str, Any] = {
             "source": "breach",
@@ -202,21 +192,16 @@ class AdvancedSearcher:
                 max_results=max_results,
             )
 
-            # Si el módulo devuelve el dict completo, respetamos su estructura,
-            # pero normalizamos lo mínimo para el coordinador.
             if isinstance(res, dict):
                 out["results"] = res.get("results") or []
-                # IMPORTANTE: conservamos errores del módulo de brechas
                 out["errors"].extend(res.get("errors") or [])
                 out["has_data"] = bool(res.get("has_data"))
 
-                # Opcionalmente propagamos datos útiles para logging/diagnóstico
                 if "timestamp" in res:
                     out["timestamp"] = res["timestamp"]
                 if "search_time" in res:
                     out["search_time"] = res["search_time"]
             else:
-                # caso raro: el módulo no devolvió un dict
                 out["errors"].append("unexpected_result_type")
 
             logger.info(
@@ -241,10 +226,6 @@ class AdvancedSearcher:
         max_results: int = 10,
         trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Envuelve general_search.search_general_real para integrarlo
-        en el mismo esquema de resultados que el resto de fuentes.
-        """
         out: Dict[str, Any] = {
             "source": "general_web",
             "query": query,
@@ -266,7 +247,7 @@ class AdvancedSearcher:
             res = general_search.search_general_real(
                 query=query,
                 user_id=user_id,
-                sources=None,          # usa fuentes pasivas por defecto
+                sources=None,
                 mode="passive",
                 max_results=max_results,
             )
@@ -305,7 +286,8 @@ class AdvancedSearcher:
         max_results: int = 10,
         max_patterns: Optional[int] = None,
         trace_id: Optional[str] = None,
-        only_with_hits: bool = True,  # ✅ lo que quieres para UI
+        only_with_hits: bool = True,
+        diagnostic_on_empty: bool = True,  # ✅ NUEVO: si no hay hits, sacar listado de dorks intentados
     ) -> Dict[str, Any]:
         out = {
             "source": "dorks",
@@ -314,12 +296,15 @@ class AdvancedSearcher:
             "errors": [],
             "has_data": False,
             "dorks_file": dorks_file,
+            "diagnostic": [],  # ✅ NUEVO: siempre disponible para UI si quieres
         }
 
         try:
             if google_dorks and hasattr(google_dorks, "search_google_dorks"):
+                # ✅ FIX: evitar ejecutar 2 veces por queries duplicadas / vacías
                 queries: List[str] = [query]
                 for candidate in extra_queries or []:
+                    candidate = (candidate or "").strip()
                     if candidate and candidate not in queries:
                         queries.append(candidate)
 
@@ -336,8 +321,8 @@ class AdvancedSearcher:
                         dorks_file=dorks_file,
                         max_results=max_results,
                         max_patterns=max_patterns,
-                        trace_id=trace_id,              # ✅ nuevo
-                        only_with_hits=only_with_hits,  # ✅ nuevo
+                        trace_id=trace_id,
+                        only_with_hits=only_with_hits,
                     )
                     if isinstance(q_results, list):
                         aggregated.extend(q_results)
@@ -357,6 +342,32 @@ class AdvancedSearcher:
                     "[trace=%s] dorks done | entries=%s | total_hits=%s | engines=%s | has_data=%s",
                     trace_id, len(aggregated), total_hits, engines, out["has_data"]
                 )
+
+                # ✅ NUEVO: si no hay hits reales, generamos diagnóstico (dorks ejecutados) SIN descartar vacíos
+                if diagnostic_on_empty and only_with_hits and not aggregated:
+                    try:
+                        diag_max_patterns = min(max_patterns or 10, 10)
+                        diag: List[Dict[str, Any]] = []
+                        for q in queries:
+                            diag_res = google_dorks.search_google_dorks(
+                                q,
+                                user_id=user_id,
+                                dorks_file=dorks_file,
+                                max_results=min(max_results, 3),
+                                max_patterns=diag_max_patterns,
+                                trace_id=trace_id,
+                                only_with_hits=False,  # 👈 devuelve entries aunque estén vacíos
+                            )
+                            if isinstance(diag_res, list):
+                                diag.extend(diag_res)
+
+                        out["diagnostic"] = diag or []
+                        logger.info(
+                            "[trace=%s] dorks diagnostic | entries=%s (max_patterns=%s)",
+                            trace_id, len(out["diagnostic"]), diag_max_patterns
+                        )
+                    except Exception as e:
+                        logger.warning("[trace=%s] dorks diagnostic failed: %s", trace_id, e)
 
         except Exception as e:
             logger.exception("Dorks search failed")
@@ -422,7 +433,6 @@ class AdvancedSearcher:
                             len(results["web"].get("results") or []),
                             round(time.time() - t0, 3))
 
-            # 🔹 NUEVO: radar general web como fuente independiente ("general_web")
             if "general_web" in sources:
                 t0 = time.time()
                 results["general_web"] = self._search_general_web(
@@ -450,13 +460,12 @@ class AdvancedSearcher:
                     round(time.time() - t0, 3)
                 )
 
-            # 🔹 NUEVO: integración de brechas como fuente "breach"
             if "breach" in sources:
                 t0 = time.time()
                 results["breach"] = self._search_breaches(
                     query=query,
                     user_id=user_id,
-                    max_results=25,   # puedes parametrizar si quieres
+                    max_results=25,
                     trace_id=trace_id,
                 )
                 searched.append("breach")
@@ -473,6 +482,16 @@ class AdvancedSearcher:
                 if email and "@" in email and email != query:
                     extra_dorks.append(email)
 
+                # ✅ NUEVO: hard cap automático si estamos "DDG only" (sin SerpAPI ni Google CSE)
+                serp = config_manager.get_config(user_id, "serpapi_api_key") or config_manager.get_config(user_id, "serpapi")
+                gkey = config_manager.get_config(user_id, "google_api_key")
+                gcx = config_manager.get_config(user_id, "google_custom_search_cx")
+                ddg_only = (not serp) and (not (gkey and gcx))
+
+                auto_max_patterns = dorks_max_patterns
+                if ddg_only and (auto_max_patterns is None or auto_max_patterns > 12):
+                    auto_max_patterns = 12  # 👈 evita ejecuciones eternas con 30-50 patterns
+
                 t0 = time.time()
                 results["dorks"] = self._search_dorks(
                     query,
@@ -480,16 +499,20 @@ class AdvancedSearcher:
                     dorks_file=dorks_file,
                     user_id=user_id,
                     max_results=dorks_max_results,
-                    max_patterns=dorks_max_patterns,
+                    max_patterns=auto_max_patterns,   # ✅ usamos el cap automático si aplica
                     trace_id=trace_id,
-                    only_with_hits=True,   # ✅ lo que quieres para UI
+                    only_with_hits=True,
+                    diagnostic_on_empty=True,         # ✅ nuevo
                 )
                 searched.append("dorks")
-                logger.info("[trace=%s] dorks wrapper done | has_data=%s entries=%s time=%ss",
-                            trace_id,
-                            results["dorks"].get("has_data"),
-                            len(results["dorks"].get("results") or []),
-                            round(time.time() - t0, 3))
+                logger.info(
+                    "[trace=%s] dorks wrapper done | has_data=%s entries=%s diag=%s time=%ss",
+                    trace_id,
+                    results["dorks"].get("has_data"),
+                    len(results["dorks"].get("results") or []),
+                    len(results["dorks"].get("diagnostic") or []),
+                    round(time.time() - t0, 3),
+                )
 
         except Exception as e:
             logger.error("[trace=%s] CRITICAL error in multi-source search", trace_id, exc_info=True)

@@ -145,7 +145,7 @@ v0.1.0 — MVP
 📞 Contacto
 
 Autor: msantander1101
-Proyecto corporativo — OSINT / CTI / Inteligencia aplicada
+OSINT / CTI / Inteligencia aplicada
 🛡 Nota Legal
 
 Este software está orientado a investigación defensiva y corporativa.
